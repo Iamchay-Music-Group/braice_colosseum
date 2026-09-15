@@ -1,0 +1,18 @@
+{
+  "name": "braice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BRAICE - Community Governance Permission Infrastructure",
+  "scripts": {
+    "dev": "pnpm --filter @braice/api dev",
+    "build": "pnpm --filter @braice/api build",
+    "start": "pnpm --filter @braice/api start:prod",
+    "test": "pnpm --filter @braice/api test",
+    "lint": "pnpm --filter @braice/api lint",
+    "seed": "pnpm --filter @braice/api seed:demo",
+    "db:migrate": "pnpm --filter @braice/api db:migrate",
+    "db:seed": "pnpm --filter @braice/api db:seed",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
+  }
+}
