@@ -284,11 +284,7 @@ cp .env.example .env
 NODE_ENV=development
 PORT=3001
 
-DB_HOST=localhost
-DB_PORT=5432
-DB_USERNAME=braice
-DB_PASSWORD=braice_secret
-DB_NAME=braice_db
+DATABASE_URL=postgresql://braice:braice_secret@localhost:5432/braice_db
 
 SOLANA_RPC_URL=https://api.devnet.solana.com
 SOLANA_PROGRAM_ID=
