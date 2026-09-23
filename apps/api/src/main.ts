@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -20,9 +21,23 @@ async function bootstrap() {
     }),
   );
 
+  const config = new DocumentBuilder()
+    .setTitle('BRAICE API')
+    .setDescription('Community Governance Permission Infrastructure')
+    .setVersion('0.1.0')
+    .addTag('Users', 'User management and wallet-based lookup')
+    .addTag('Communities', 'Community CRUD and governance config')
+    .addTag('Memberships', 'Community membership management')
+    .addTag('Activity', 'Individual activity ingestion (internal only)')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('docs', app, document);
+
   const port = process.env.PORT || 3001;
   await app.listen(port);
   console.log(`BRAICE API running on http://localhost:${port}/api`);
+  console.log(`Swagger docs at http://localhost:${port}/docs`);
 }
 
 bootstrap();

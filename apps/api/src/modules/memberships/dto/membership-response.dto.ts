@@ -1,16 +1,28 @@
-import { IsUUID, IsOptional, IsString } from 'class-validator';
+import { IsUUID, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class JoinCommunityDto {
-  @IsOptional()
+  @ApiProperty({ description: 'UUID of the user joining the community' })
   @IsUUID()
-  userId?: string;
+  userId!: string;
 }
 
 export class MembershipResponseDto {
+  @ApiProperty()
   id!: string;
+
+  @ApiProperty()
   communityId!: string;
+
+  @ApiProperty()
   userId!: string;
+
+  @ApiProperty({ example: 'MEMBER' })
   role!: string;
+
+  @ApiProperty({ example: 'ACTIVE' })
   status!: string;
+
+  @ApiProperty()
   joinedAt!: Date;
 }
