@@ -1,18 +1,41 @@
-// ActivityRecord entity
-// PostgreSQL table: activity_records
-// Columns:
-// - id: UUID primary key
-// - community_id: UUID not null FK -> communities(id)
-// - member_id: UUID not null FK -> users(id)
-// - activity_type: TEXT not null (clicked, viewed, purchased)
-// - interest_category: TEXT not null (streetwear, music, sneakers, beauty)
-// - metadata: JSONB optional
-// - occurred_at: TIMESTAMPTZ not null
-//
-// CRITICAL: This table contains individual-level data.
-// It must NEVER be directly queried by brands or AI.
-// The aggregation pipeline (DatasetsModule) transforms this into community intelligence.
-//
-// Relations:
-// - community: ManyToOne -> Community
-// - member: ManyToOne -> User
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
+import { User } from '../../users/entities/user.entity';
+import { Community } from '../../communities/entities/community.entity';
+
+@Entity('activity_records')
+export class ActivityRecord {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'community_id', type: 'uuid' })
+  communityId!: string;
+
+  @Column({ name: 'member_id', type: 'uuid' })
+  memberId!: string;
+
+  @Column({ name: 'activity_type', type: 'text' })
+  activityType!: string;
+
+  @Column({ name: 'interest_category', type: 'text' })
+  interestCategory!: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata!: Record<string, unknown> | null;
+
+  @Column({ name: 'occurred_at', type: 'timestamptz' })
+  occurredAt!: Date;
+
+  @ManyToOne(() => Community, (community) => community.activityRecords)
+  @JoinColumn({ name: 'community_id' })
+  community!: Community;
+
+  @ManyToOne(() => User, (user) => user.activities)
+  @JoinColumn({ name: 'member_id' })
+  member!: User;
+}

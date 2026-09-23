@@ -1,6 +1,24 @@
-// Create user DTO
-// Validation:
-// - displayName: required string
-// - walletAddress: optional string (unique)
-// - email: optional email format
-// - userType: required enum (CREATOR, MEMBER, BRAND, APPLICATION)
+import { IsString, IsOptional, IsEnum, IsEmail } from 'class-validator';
+
+export enum CreateUserType {
+  CREATOR = 'CREATOR',
+  MEMBER = 'MEMBER',
+  BRAND = 'BRAND',
+  APPLICATION = 'APPLICATION',
+}
+
+export class CreateUserDto {
+  @IsString()
+  displayName!: string;
+
+  @IsOptional()
+  @IsString()
+  walletAddress?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsEnum(CreateUserType)
+  userType!: CreateUserType;
+}

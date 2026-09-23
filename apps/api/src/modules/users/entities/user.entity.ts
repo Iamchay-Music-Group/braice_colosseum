@@ -1,15 +1,40 @@
-// User entity
-// PostgreSQL table: users
-// Columns:
-// - id: UUID primary key
-// - wallet_address: TEXT unique (Solana wallet)
-// - email: TEXT optional
-// - display_name: TEXT not null
-// - user_type: ENUM (CREATOR, MEMBER, BRAND, APPLICATION, ADMIN)
-// - created_at: TIMESTAMPTZ default NOW()
-//
-// Relations:
-// - memberships: OneToMany -> Membership
-// - operatedCommunities: OneToMany -> Community
-// - activities: OneToMany -> ActivityRecord
-// - auditEvents: OneToMany -> AuditEvent
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  OneToMany,
+} from 'typeorm';
+import { Membership } from '../../memberships/entities/membership.entity';
+import { Community } from '../../communities/entities/community.entity';
+import { ActivityRecord } from '../../activity/entities/activity-record.entity';
+
+@Entity('users')
+export class User {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'wallet_address', type: 'text', unique: true, nullable: true })
+  walletAddress!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  email!: string | null;
+
+  @Column({ name: 'display_name', type: 'text' })
+  displayName!: string;
+
+  @Column({ name: 'user_type', type: 'text' })
+  userType!: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @OneToMany(() => Membership, (membership) => membership.user)
+  memberships!: Membership[];
+
+  @OneToMany(() => Community, (community) => community.operator)
+  operatedCommunities!: Community[];
+
+  @OneToMany(() => ActivityRecord, (activity) => activity.member)
+  activities!: ActivityRecord[];
+}

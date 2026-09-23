@@ -1,7 +1,19 @@
-// Create activity DTO
-// Validation:
-// - memberId: required UUID (user generating activity)
-// - activityType: required string (clicked, viewed, purchased, etc.)
-// - interestCategory: required string (streetwear, music, sneakers, etc.)
-// - metadata: optional JSON (additional context)
-// - occurredAt: required Date
+import { IsUUID, IsString, IsOptional, IsDateString, IsObject } from 'class-validator';
+
+export class CreateActivityDto {
+  @IsUUID()
+  memberId!: string;
+
+  @IsString()
+  activityType!: string;
+
+  @IsString()
+  interestCategory!: string;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+
+  @IsDateString()
+  occurredAt!: string;
+}

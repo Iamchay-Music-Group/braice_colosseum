@@ -1,8 +1,16 @@
-// Membership response DTO
-// Shape:
-// - id: string
-// - communityId: string
-// - userId: string
-// - role: string (OPERATOR, MEMBER)
-// - status: string (ACTIVE, INACTIVE)
-// - joinedAt: Date
+import { IsUUID, IsOptional, IsString } from 'class-validator';
+
+export class JoinCommunityDto {
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
+}
+
+export class MembershipResponseDto {
+  id!: string;
+  communityId!: string;
+  userId!: string;
+  role!: string;
+  status!: string;
+  joinedAt!: Date;
+}
