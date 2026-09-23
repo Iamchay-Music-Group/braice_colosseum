@@ -53,51 +53,15 @@ db-migrate: ## Run SQL migrations
 		-f database/migrations/001_init.sql
 
 db-seed: ## Seed demo data via API (start API first)
-	@echo "Creating creator..."
-	@CREATOR=$$(curl -sf -X POST http://localhost:3001/api/users \
-		-H 'Content-Type: application/json' \
-		-d '{"displayName":"Afrobeat King","userType":"CREATOR","walletAddress":"wallet_demo_001"}' | \
-		python3 -c "import sys,json;print(json.load(sys.stdin)['id'])"); \
-	echo "Creator: $$CREATOR"; \
-	echo "Creating community..."; \
-	COMMUNITY=$$(curl -sf -X POST http://localhost:3001/api/communities \
-		-H 'Content-Type: application/json' \
-		-d "{\"name\":\"Afrobeat Creators\",\"description\":\"The largest afrobeat creator community\",\"operatorId\":\"$$CREATOR\",\"governanceConfig\":{\"approvalMode\":\"CREATOR_AND_THRESHOLD\",\"thresholdPercentage\":60}}" | \
-		python3 -c "import sys,json;print(json.load(sys.stdin)['id'])"); \
-	echo "Community: $$COMMUNITY"; \
-	echo "Creating 100 members..."; \
-	for i in $$(seq 1 100); do \
-		curl -sf -X POST http://localhost:3001/api/users \
-			-H 'Content-Type: application/json' \
-			-d "{\"displayName\":\"Member $$i\",\"userType\":\"MEMBER\",\"walletAddress\":\"wallet_member_$$i\"}" > /dev/null; \
-	done; \
-	echo "Joining members to community..."; \
-	MEMBER_IDS=$$(curl -sf http://localhost:3001/api/users | \
-		python3 -c "import sys,json;[print(u['id']) for u in json.load(sys.stdin) if u['userType']=='MEMBER']"); \
-	for MID in $$MEMBER_IDS; do \
-		curl -sf -X POST "http://localhost:3001/api/communities/$$COMMUNITY/members" \
-			-H 'Content-Type: application/json' \
-			-d "{\"userId\":\"$$MID\"}" > /dev/null; \
-	done; \
-	echo "Generating 1000 activity records..."; \
-	MEMBER_SAMPLE=$$(curl -sf http://localhost:3001/api/users | \
-		python3 -c "import sys,json;users=[u['id'] for u in json.load(sys.stdin) if u['userType']=='MEMBER'];import random;print('\n'.join(random.choice(users) for _ in range(1000)))"); \
-	CATS="streetwear music_festivals sneakers beauty food nightlife fitness art technology"; \
-	TYPES="clicked viewed purchased bookmarked shared"; \
-	echo "$$MEMBER_SAMPLE" | while read -r MID; do \
-		CAT=$$(echo "$$CATS" | tr ' ' '\n' | shuf -n1); \
-		TYP=$$(echo "$$TYPES" | tr ' ' '\n' | shuf -n1); \
-		curl -sf -X POST "http://localhost:3001/api/communities/$$COMMUNITY/activity" \
-			-H 'Content-Type: application/json' \
-			-d "{\"memberId\":\"$$MID\",\"activityType\":\"$$TYP\",\"interestCategory\":\"$$CAT\",\"occurredAt\":\"2026-09-23T12:00:00Z\"}" > /dev/null; \
-	done; \
-	echo "Done! 100 members, 1000 activity records seeded."
+	@bash scripts/seed-demo.sh
 
 # ─── Full lifecycle ────────────────────────────────────────
 up: db-up ## Start everything (db + api)
 	@sleep 1
 	$(MAKE) build
-	$(MAKE) dev
+	cd apps/api && setsid node dist/main.js > /tmp/braice-api.log 2>&1 &
+	@sleep 3
+	@curl -sf http://localhost:3001/api/users > /dev/null && echo "API running on http://localhost:3001" || echo "API failed to start"
 
 down: ## Stop everything
 	@kill $$(lsof -ti:3001) 2>/dev/null || true
