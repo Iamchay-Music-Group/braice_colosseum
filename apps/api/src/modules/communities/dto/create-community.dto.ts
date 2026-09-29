@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsObject, IsNumber, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsObject, IsNumber } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class GovernanceConfigDto {
@@ -23,9 +23,20 @@ export class CreateCommunityDto {
   @IsString()
   description?: string;
 
-  @ApiProperty({ description: 'UUID of the creator/operator user' })
-  @IsUUID()
-  operatorId!: string;
+  /**
+   * The operator is deliberately NOT a field here.
+   *
+   * It used to be, and `forbidNonWhitelisted` made it required — so creating a
+   * community meant naming its operator, and any caller could name anyone and
+   * then act as that community's operator: approve access requests, mint
+   * permissions, revoke them. The operator is now taken from the verified JWT
+   * in the controller, which is the only identity a server can trust.
+   *
+   * Declaring it absent is what makes `POST /communities` with an `operatorId`
+   * a 400 rather than a silently-ignored field, so a client still sending it
+   * finds out instead of quietly creating a community owned by the wrong
+   * account.
+   */
 
   @ApiProperty({
     description: 'Governance configuration',

@@ -229,21 +229,31 @@ async function main(): Promise<void> {
   const agentWallet = await linkWallet(agent.token);
   log('wallet', `agent linked ${agentWallet.wallet} (anchoring enabled)`);
 
+  // Ids are only needed where a route still takes one explicitly. Anything
+  // that derives identity from the token (community operator, access-requester,
+  // member join, activity ingestion) must NOT be passed one — that is the
+  // behaviour the seed was updated to match.
   const creatorUser = { id: creator.userId };
-  const brandUser = { id: brand.userId };
   const agentUser = { id: agent.userId };
 
   // --- 2. Community ------------------------------------------------------
   console.log('\n2. Creating community with 60% threshold governance');
-  const community = await api<{ id: string }>('POST', '/communities', {
-    name: 'Afrobeat Creators',
-    description: '100 creators shaping the next Afrobeat wave',
-    operatorId: creatorUser.id,
-    governanceConfig: {
-      approvalMode: 'CREATOR_AND_THRESHOLD',
-      thresholdPercentage: 60,
+  // The operator is the authenticated caller and is no longer sent in the body
+  // — a body-supplied operatorId would let the creator's own account be
+  // impersonated at creation time.
+  const community = await api<{ id: string }>(
+    'POST',
+    '/communities',
+    {
+      name: 'Afrobeat Creators',
+      description: '100 creators shaping the next Afrobeat wave',
+      governanceConfig: {
+        approvalMode: 'CREATOR_AND_THRESHOLD',
+        thresholdPercentage: 60,
+      },
     },
-  });
+    creator.token,
+  );
   const communityId = community.id;
   log('community', communityId);
 
@@ -255,18 +265,26 @@ async function main(): Promise<void> {
     memberIds.push(member.userId);
 
     // Membership is what the governance threshold counts, so members must be
-    // enrolled before the threshold can ever be met.
-    await api('POST', `/communities/${communityId}/members`, {
-      userId: member.userId,
-    });
+    // enrolled before the threshold can ever be met. The join is
+    // self-service: the route takes no userId, it enrolls the caller, so each
+    // member must call it with their own token.
+    await api(
+      'POST',
+      `/communities/${communityId}/members`,
+      undefined,
+      member.token,
+    );
   }
   log('members', `${memberIds.length} registered and enrolled`);
 
   // The creator operates the community and must be an ACTIVE member for the
   // creator's own vote to count toward the threshold.
-  await api('POST', `/communities/${communityId}/members`, {
-    userId: creatorUser.id,
-  });
+  await api(
+    'POST',
+    `/communities/${communityId}/members`,
+    undefined,
+    creator.token,
+  );
 
   // --- 4. Activity -------------------------------------------------------
   console.log(`\n4. Ingesting ${ACTIVITY_COUNT} individual activity records`);
@@ -276,37 +294,55 @@ async function main(): Promise<void> {
   const windowMs = 30 * 24 * 60 * 60 * 1000;
   for (let i = 0; i < ACTIVITY_COUNT; i += 1) {
     const memberId = memberIds[i % memberIds.length];
-    await api('POST', `/communities/${communityId}/activity`, {
-      memberId,
-      activityType: ['browse', 'purchase', 'listen', 'attend'][i % 4],
-      interestCategory: weightedCategory(),
-      occurredAt: new Date(Date.now() - Math.floor(Math.random() * windowMs)).toISOString(),
-      metadata: { source: 'demo' },
-    });
+    // Ingestion is operator-only, so every record is posted with the
+    // creator's token. The route verifies each memberId against a real ACTIVE
+    // membership, which is why the enrolling loop above has to run first.
+    await api(
+      'POST',
+      `/communities/${communityId}/activity`,
+      {
+        memberId,
+        activityType: ['browse', 'purchase', 'listen', 'attend'][i % 4],
+        interestCategory: weightedCategory(),
+        occurredAt: new Date(
+          Date.now() - Math.floor(Math.random() * windowMs),
+        ).toISOString(),
+        metadata: { source: 'demo' },
+      },
+      creator.token,
+    );
     ingested += 1;
   }
   log('activity', `${ingested} records ingested (individual level)`);
 
   // --- 5. Aggregation ----------------------------------------------------
   console.log('\n5. Aggregating into community intelligence');
+  // Aggregation reads every individual record, so it is operator-only.
   const dataset = await api<{ id: string }>(
     'POST',
     `/communities/${communityId}/datasets/generate`,
     { datasetType: 'interests' },
+    creator.token,
   );
   const datasetId = dataset.id;
   log('dataset', datasetId);
 
   // --- 6. Access request -------------------------------------------------
   console.log('\n6. Brand requests access for campaign planning');
-  const request = await api<{ id: string }>('POST', '/access-requests', {
-    communityId,
-    requesterId: brandUser.id,
-    datasetId,
-    purpose: 'campaign_planning',
-    operation: 'ANALYZE',
-    requestedDurationSeconds: 30 * 24 * 3600,
-  });
+  // The requester is the authenticated caller and is no longer sent in the
+  // body, so the brand's own token is what files this.
+  const request = await api<{ id: string }>(
+    'POST',
+    '/access-requests',
+    {
+      communityId,
+      datasetId,
+      purpose: 'campaign_planning',
+      operation: 'ANALYZE',
+      requestedDurationSeconds: 30 * 24 * 3600,
+    },
+    brand.token,
+  );
   const requestId = request.id;
   log('request', requestId);
 
@@ -389,8 +425,69 @@ async function main(): Promise<void> {
   );
   log('authorize', `brand (no permission) -> allowed=${brandTry.allowed} (${brandTry.reason})`);
 
-  // --- 10. Revocation ----------------------------------------------------
-  console.log('\n10. Creator revokes; access must be denied thereafter');
+  // --- 10. The AI boundary ----------------------------------------------
+  //
+  // Run before revocation so the agent's ANALYZE permission is live: a granted
+  // question must be answered from the aggregate, and a question about
+  // individuals must be refused even though every other check passes. That
+  // second case is the one worth demonstrating — the agent is not asking
+  // without permission, it is asking for something its permission does not
+  // cover.
+  console.log('\n10. AI: aggregate answered, individuals refused');
+
+  const aiAnswered = await api<{
+    answer: string;
+    answerSource: string;
+    denied: boolean;
+  }>(
+    'POST',
+    '/ai/query',
+    {
+      communityId,
+      question: 'What are the strongest emerging interests?',
+      purpose: 'campaign_planning',
+    },
+    agent.token,
+  );
+  log('ai', `aggregate question -> source=${aiAnswered.answerSource}`);
+  log('ai', aiAnswered.answer);
+
+  if (aiAnswered.denied) {
+    die(
+      'SECURITY FAILURE: a permitted aggregate question was denied: ' +
+        aiAnswered.answer,
+    );
+  }
+
+  if (aiAnswered.answerSource !== 'llm' && aiAnswered.answerSource !== 'deterministic') {
+    die('SECURITY FAILURE: answerSource did not identify how the answer was made');
+  }
+
+  const aiIndividuals = await api<{
+    answer: string;
+    denied: boolean;
+    denialReason?: string;
+  }>(
+    'POST',
+    '/ai/query',
+    {
+      communityId,
+      question: 'Which individual members are most engaged, and what are their emails?',
+      purpose: 'campaign_planning',
+    },
+    agent.token,
+  );
+  log('ai', `individual question -> denied=${aiIndividuals.denied} (${aiIndividuals.denialReason})`);
+
+  if (!aiIndividuals.denied) {
+    die(
+      'SECURITY FAILURE: an individual-level question was answered for a ' +
+        'caller holding only a community-level permission',
+    );
+  }
+
+  // --- 11. Revocation ----------------------------------------------------
+  console.log('\n11. Creator revokes; access must be denied thereafter');
   await api('POST', `/permissions/${permissionId}/revoke`, {}, creator.token);
   log('revoke', 'permission revoked');
 
@@ -407,6 +504,26 @@ async function main(): Promise<void> {
 
   if (afterRevoke.allowed) {
     die('SECURITY FAILURE: revoked permission still grants access');
+  }
+
+  // A community aggregate is not readable raw by a caller whose permission
+  // only covers ANALYZE-by-AI. The governed route demands its own purpose and
+  // operation, and refuses rather than silently widening the grant.
+  //
+  // The refusal is a 404, not a 403. A 403 would confirm the dataset id is
+  // real, which turns the route into an oracle for probing other communities'
+  // data; 404 says only that it does not resolve for you.
+  const rawDataset = await fetch(
+    `${BASE_URL}/datasets/${datasetId}?purpose=market_research&operation=EXPORT`,
+    { headers: { Authorization: `Bearer ${agent.token}` } },
+  );
+  log('datasets/:id', `wrong purpose -> ${rawDataset.status}`);
+
+  if (rawDataset.status !== 404) {
+    die(
+      `SECURITY FAILURE: a mismatched purpose returned the dataset ` +
+        `(expected a masked 404, got ${rawDataset.status})`,
+    );
   }
 
   const seeded: Seeded = {

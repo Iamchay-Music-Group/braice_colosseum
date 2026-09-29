@@ -43,6 +43,17 @@ export class CommunitiesService {
     });
   }
 
+  /**
+   * A community row, or null.
+   *
+   * Distinct from findById, which throws. Callers that need to decide between
+   * "not found" and "not yours" use this so they can apply their own policy to
+   * a missing community, instead of inheriting a 404 from a shared helper.
+   */
+  async findByIdOrNull(id: string): Promise<Community | null> {
+    return this.communityRepo.findOne({ where: { id } });
+  }
+
   async findAll(): Promise<Community[]> {
     return this.communityRepo.find({
       relations: ['operator'],

@@ -39,7 +39,6 @@ describe('CommunitiesService', () => {
     it('should create a community', async () => {
       const dto: CreateCommunityDto = {
         name: 'Afrobeat Creators',
-        operatorId: 'operator-uuid',
         governanceConfig: { approvalMode: 'CREATOR_AND_THRESHOLD', thresholdPercentage: 60 },
       };
       const saved = { id: 'comm-1', name: 'Afrobeat Creators', operatorId: 'operator-uuid', governanceConfig: dto.governanceConfig };
@@ -62,7 +61,6 @@ describe('CommunitiesService', () => {
       const dto: CreateCommunityDto = {
         name: 'Test',
         description: 'A test community',
-        operatorId: 'op-1',
         governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
       };
 

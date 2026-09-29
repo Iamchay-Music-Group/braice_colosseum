@@ -5,12 +5,15 @@ import {
   AccessRequest,
   AccessRequestStatus,
 } from './entities/access-request.entity';
+import { AuditService } from '../audit/audit.service';
+import { AuditEventType } from '../audit/entities/audit-event.entity';
 
 @Injectable()
 export class AccessRequestsService {
   constructor(
     @InjectRepository(AccessRequest)
     private readonly requestRepo: Repository<AccessRequest>,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -25,7 +28,7 @@ export class AccessRequestsService {
     operation: string;
     requestedDurationSeconds: number;
   }): Promise<AccessRequest> {
-    return this.requestRepo.save(
+    const request = await this.requestRepo.save(
       this.requestRepo.create({
         communityId: dto.communityId,
         requesterId: dto.requesterId,
@@ -36,6 +39,29 @@ export class AccessRequestsService {
         status: AccessRequestStatus.PENDING,
       }),
     );
+
+    // The request itself was not audited, so the trail began at
+    // GOVERNANCE_APPROVED with nothing showing who asked or for what. This is
+    // the entry point of the whole story: a reader needs the ask, not just the
+    // decision, or a grant has no visible motivation.
+    //
+    // Recorded after the save so the row exists before it is referenced, and
+    // AuditService.record never throws, so a logging failure cannot discard a
+    // request the user successfully made.
+    await this.auditService.record({
+      communityId: dto.communityId,
+      actorId: dto.requesterId,
+      eventType: AuditEventType.ACCESS_REQUESTED,
+      resourceId: dto.datasetId,
+      metadata: {
+        requestId: request.id,
+        purpose: dto.purpose,
+        operation: dto.operation,
+        requestedDurationSeconds: dto.requestedDurationSeconds,
+      },
+    });
+
+    return request;
   }
 
   async findById(id: string): Promise<AccessRequest> {

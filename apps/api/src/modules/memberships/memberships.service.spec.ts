@@ -4,6 +4,7 @@ import { NotFoundException, ConflictException } from '@nestjs/common';
 import { Repository, ObjectLiteral } from 'typeorm';
 import { MembershipsService } from './memberships.service';
 import { Membership } from './entities/membership.entity';
+import { Community } from '../communities/entities/community.entity';
 
 type MockRepo<T extends ObjectLiteral = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -19,12 +20,18 @@ const mockRepo = (): MockRepo => ({
 describe('MembershipsService', () => {
   let service: MembershipsService;
   let repo: MockRepo<Membership>;
+  let communityRepo: MockRepo<Community>;
 
   beforeEach(async () => {
+    // The service resolves community ownership for its operator checks, so
+    // both repositories are required to construct it.
+    communityRepo = mockRepo();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MembershipsService,
         { provide: getRepositoryToken(Membership), useValue: mockRepo() },
+        { provide: getRepositoryToken(Community), useValue: communityRepo },
       ],
     }).compile();
 

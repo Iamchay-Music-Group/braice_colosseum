@@ -73,12 +73,46 @@ export class DatasetsService {
     return saved;
   }
 
+  /**
+   * A community row, or null.
+   *
+   * Callers need to distinguish "no such community" from "not your community"
+   * to choose their own status code, so this returns null rather than throwing
+   * the way findById-adjacent helpers might.
+   */
+  async findCommunity(communityId: string): Promise<Community | null> {
+    return this.communityRepo.findOne({ where: { id: communityId } });
+  }
+
   async findById(id: string): Promise<CommunityDataset> {
     const dataset = await this.datasetRepo.findOne({ where: { id } });
     if (!dataset) {
       throw new NotFoundException(`Dataset ${id} not found`);
     }
     return dataset;
+  }
+
+  /** Alias that makes the throwing behaviour explicit at the call site. */
+  async requireById(id: string): Promise<CommunityDataset> {
+    return this.findById(id);
+  }
+
+  /**
+   * The community a dataset belongs to, or null.
+   *
+   * Reads one column instead of the whole row, because the caller uses this to
+   * decide who owns the dataset and then hands the read itself to
+   * AuthorizationService. A full row loaded here would be a row read before
+   * the permission check that decides whether reading it is allowed.
+   */
+  async findCommunityIdOf(id: string): Promise<string | null> {
+    const row = await this.datasetRepo
+      .createQueryBuilder('dataset')
+      .select('dataset.communityId', 'communityId')
+      .where('dataset.id = :id', { id })
+      .getRawOne<{ communityId: string } | null>();
+
+    return row?.communityId ?? null;
   }
 
   async findByCommunity(communityId: string): Promise<CommunityDataset[]> {
