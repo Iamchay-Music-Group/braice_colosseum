@@ -1,11 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AggregationLevel } from '@braice/permission-engine';
 import { PermissionsService } from '../permissions/permissions.service';
 import { AuthorizeRequestDto } from './dto/authorize-request.dto';
 import { AuthorizationResponseDto } from './dto/authorization-response.dto';
 import { CommunityDataset } from '../datasets/entities/community-dataset.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuditEventType } from '../audit/entities/audit-event.entity';
 
 /**
  * The authorization gateway.
@@ -30,24 +32,30 @@ export class AuthorizationService {
    *
    * The principalId is the caller's verified identity, supplied by the guard
    * from the JWT — never read from the request body.
+   *
+   * `requestedAggregationLevel` lets a caller state that it is reaching for
+   * finer granularity than the resource holds. The engine refuses it, so this
+   * is a way to be told no, never a way to obtain more.
    */
   async authorize(
     principalId: string,
     dto: AuthorizeRequestDto,
+    requestedAggregationLevel?: AggregationLevel,
   ): Promise<AuthorizationResponseDto> {
     const decision = await this.permissionsService.checkAccess({
       principalId,
       resourceId: dto.resourceId,
       purpose: dto.purpose,
       operation: dto.operation,
+      requestedAggregationLevel,
     });
 
     await this.auditService.record({
       communityId: decision.communityId ?? null,
       actorId: principalId,
       eventType: decision.allowed
-        ? 'ACCESS_GRANTED'
-        : 'ACCESS_DENIED',
+        ? AuditEventType.ACCESS_GRANTED
+        : AuditEventType.ACCESS_DENIED,
       resourceId: dto.resourceId,
       permissionId: decision.permissionId ?? null,
       metadata: {
@@ -55,12 +63,18 @@ export class AuthorizationService {
         operation: dto.operation,
         reason: decision.reason,
         aggregationLevel: decision.aggregationLevel,
+        // Null rather than omitted when not applicable, so a reader can tell
+        // "asked for the default level" from "asked for individual and was
+        // refused", which is the interesting case.
+        requestedAggregationLevel: requestedAggregationLevel ?? null,
       },
     });
 
     if (!decision.allowed) {
       this.logger.log(
-        `DENY principal=${principalId} resource=${dto.resourceId} reason=${decision.reason}`,
+        `DENY principal=${principalId} resource=${dto.resourceId} ` +
+          `reason=${decision.reason} ` +
+          `requestedAggregationLevel=${requestedAggregationLevel ?? 'DEFAULT'}`,
       );
     }
 
@@ -77,10 +91,17 @@ export class AuthorizationService {
   async loadAuthorizedDataset(
     principalId: string,
     dto: AuthorizeRequestDto,
+    requestedAggregationLevel?: AggregationLevel,
   ): Promise<CommunityDataset> {
-    const decision = await this.authorize(principalId, dto);
+    const decision = await this.authorize(
+      principalId,
+      dto,
+      requestedAggregationLevel,
+    );
 
     if (!decision.allowed) {
+      // NotFoundException rather than ForbiddenException: a 403 would confirm
+      // the resource exists to someone with no permission to know that.
       throw new NotFoundException(
         `Access denied: ${decision.reason ?? 'UNKNOWN'}`,
       );

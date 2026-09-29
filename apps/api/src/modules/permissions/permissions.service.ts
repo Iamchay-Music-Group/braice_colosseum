@@ -21,7 +21,8 @@ import { Community } from '../communities/entities/community.entity';
 import { User } from '../users/entities/user.entity';
 import { HashService } from '../blockchain/hash.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
-
+import { AuditService } from '../audit/audit.service';
+import { AuditEventType } from '../audit/entities/audit-event.entity';
 
 @Injectable()
 export class PermissionsService {
@@ -39,6 +40,7 @@ export class PermissionsService {
     private readonly engine: PermissionEngine,
     private readonly hashService: HashService,
     private readonly blockchainService: BlockchainService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -54,6 +56,12 @@ export class PermissionsService {
     purpose: string;
     operation: Operation;
     now?: Date;
+    /**
+     * Granularity the caller wants to read at, when finer than the resource
+     * naturally provides. See AccessEvaluationInput — naming INDIVIDUAL is a
+     * request the engine can refuse, not a way to obtain member data.
+     */
+    requestedAggregationLevel?: AggregationLevel;
   }): Promise<AuthorizationDecision> {
     const resource = await this.resolveResource(input.resourceId);
     const permission = await this.findApplicablePermission(
@@ -68,6 +76,7 @@ export class PermissionsService {
         purpose: input.purpose,
         operation: input.operation as unknown as Operation,
         now: input.now ?? new Date(),
+        requestedAggregationLevel: input.requestedAggregationLevel,
       },
       permission,
     );
@@ -302,6 +311,25 @@ export class PermissionsService {
       `Permission ${id} revoked by ${revokerId} (community ${dataset.communityId})`,
     );
 
+    // Revocation is the outcome an auditor most needs to see, and it was not
+    // previously recorded. `revokedBy` is stored because "who withdrew this and
+    // when" is the question the event exists to answer, and a bare timestamp
+    // cannot answer it after the operator account changes hands.
+    await this.auditService.record({
+      communityId: dataset.communityId,
+      actorId: revokerId,
+      eventType: AuditEventType.PERMISSION_REVOKED,
+      resourceId: saved.resourceId,
+      permissionId: saved.id,
+      metadata: {
+        purpose: saved.purpose,
+        operation: saved.operation,
+        revokedBy: revokerId,
+        expiresAt: saved.expiresAt,
+        anchoredOnChain: Boolean(saved.blockchainReference),
+      },
+    });
+
     return saved;
   }
 
@@ -330,6 +358,7 @@ export class PermissionsService {
   async findAll(): Promise<Permission[]> {
     return this.permissionRepo.find({ order: { issuedAt: 'DESC' } });
   }
+
 }
 
 export { DenialReason };

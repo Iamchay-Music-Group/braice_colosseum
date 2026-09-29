@@ -15,6 +15,13 @@ export enum AuditEventType {
   ACCESS_GRANTED = 'ACCESS_GRANTED',
   ACCESS_DENIED = 'ACCESS_DENIED',
   AI_ACCESS_GRANTED = 'AI_ACCESS_GRANTED',
+  /**
+   * A denied AI query. Kept separate from AI_ACCESS_GRANTED rather than
+   * inferred from its absence, so a run of failed queries is a queryable
+   * pattern and not a hole in the timeline. The `text` column means no
+   * migration is required to add it.
+   */
+  AI_ACCESS_DENIED = 'AI_ACCESS_DENIED',
   AI_ANALYSIS_COMPLETED = 'AI_ANALYSIS_COMPLETED',
 }
 

@@ -11,6 +11,7 @@ import { PermissionsController } from './permissions.controller';
 import { HashService } from '../blockchain/hash.service';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { AuthModule } from '../auth/auth.module';
+import { AuditModule } from '../audit/audit.module';
 
 /**
  * THE MOST IMPORTANT MODULE.
@@ -23,6 +24,10 @@ import { AuthModule } from '../auth/auth.module';
     BlockchainModule,
     // AuthModule exports JwtAuthGuard, which guards every permission route.
     AuthModule,
+    // Revocation and issuance write audit events. AuditModule exports
+    // AuditService, and never throws on write failure, so a logging outage
+    // cannot fail a governance action that already committed to Postgres.
+    AuditModule,
   ],
   controllers: [PermissionsController],
   providers: [
@@ -31,6 +36,8 @@ import { AuthModule } from '../auth/auth.module';
     { provide: PermissionEngine, useClass: PermissionEngine },
     JwtAuthGuard,
   ],
+  // PermissionsService is exported: AuthorizationService is the only consumer,
+  // and AiGateway reaches data exclusively through it.
   exports: [PermissionsService, HashService, PermissionEngine, JwtAuthGuard],
 })
 export class PermissionsModule {}
