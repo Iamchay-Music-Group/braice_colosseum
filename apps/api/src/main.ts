@@ -28,8 +28,16 @@ async function bootstrap() {
     .addTag('Auth', 'Email + password sign-in, and optional Solana wallet linking')
     .addTag('Users', 'Read-only user directory (no self-assigned roles)')
     .addTag('Communities', 'Community CRUD and governance config')
-    .addTag('Memberships', 'Community membership management')
-    .addTag('Activity', 'Individual activity ingestion (internal only)')
+    .addTag('Memberships', 'Self-service join and leave; operator-only removal')
+    .addTag(
+      'Activity',
+      'Individual activity ingestion (operator only). There is no route that ' +
+        'returns an individual record; only a count.',
+    )
+    .addTag('Access Requests', 'Permission proposals awaiting governance')
+    .addTag('Datasets', 'Community-level aggregates. Governed reads.')
+    .addTag('AI', 'Permission-checked analysis of community intelligence')
+    .addTag('Audit', 'Decision trail, read by operators and grantees')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

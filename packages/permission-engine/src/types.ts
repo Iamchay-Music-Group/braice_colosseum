@@ -70,6 +70,22 @@ export interface AccessEvaluationInput {
   purpose: string;
   operation: Operation;
   now: Date;
+  /**
+   * The granularity the caller is asking to read at, which may be finer than
+   * the resource naturally provides.
+   *
+   * Set this when a caller reaches for member-level detail through an
+   * otherwise-authorized path — an AI tool being asked "which members like
+   * streetwear" is the motivating case. The engine denies it with
+   * INDIVIDUAL_DATA_RESTRICTED, so the refusal is a recorded policy decision
+   * rather than a shape error the caller happened to avoid.
+   *
+   * Omitted by ordinary reads, which want the resource as-is. It is a request,
+   * never an entitlement: naming a coarser level grants nothing, and the
+   * server-written conditions below remain the only authority on what is
+   * reachable.
+   */
+  requestedAggregationLevel?: AggregationLevel;
 }
 
 export enum DenialReason {

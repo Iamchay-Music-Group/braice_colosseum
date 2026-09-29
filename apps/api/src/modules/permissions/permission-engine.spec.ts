@@ -201,6 +201,80 @@ describe('PermissionEngine', () => {
     });
   });
 
+  describe('requested aggregation level', () => {
+    it('allows an ordinary request that names no granularity', () => {
+      const decision = engine.checkAccess(input(), permission());
+
+      expect(decision.allowed).toBe(true);
+    });
+
+    it('allows an explicit COMMUNITY request under a COMMUNITY grant', () => {
+      const decision = engine.checkAccess(
+        input({ requestedAggregationLevel: AggregationLevel.COMMUNITY }),
+        permission(),
+      );
+
+      expect(decision.allowed).toBe(true);
+    });
+
+    it('denies an otherwise-valid request for INDIVIDUAL data', () => {
+      // The case the AI path depends on. The permission is active, unexpired,
+      // correct purpose, correct operation, correct resource — every one of
+      // those checks passes, and the answer is still no.
+      const decision = engine.checkAccess(
+        input({ requestedAggregationLevel: AggregationLevel.INDIVIDUAL }),
+        permission(),
+      );
+
+      expect(decision.allowed).toBe(false);
+      expect(decision.reason).toBe(DenialReason.INDIVIDUAL_DATA_RESTRICTED);
+    });
+
+    it('returns the denying permission id, so the caller can see what refused it', () => {
+      const decision = engine.checkAccess(
+        input({ requestedAggregationLevel: AggregationLevel.INDIVIDUAL }),
+        permission(),
+      );
+
+      expect(decision.permissionId).toBe('permission-1');
+    });
+
+    it('never reports INDIVIDUAL aggregation on a denial', () => {
+      const decision = engine.checkAccess(
+        input({ requestedAggregationLevel: AggregationLevel.INDIVIDUAL }),
+        permission(),
+      );
+
+      expect(decision.aggregationLevel).not.toBe(AggregationLevel.INDIVIDUAL);
+    });
+
+    it('still denies a misconfigured grant with allowIndividualData:true', () => {
+      // Check 8 still fires independently of the requested level, so a
+      // misconfigured grant cannot be reached by simply omitting the field.
+      const decision = engine.checkAccess(
+        input(),
+        permission({
+          conditions: {
+            aggregationLevel: AggregationLevel.COMMUNITY,
+            allowIndividualData: true,
+          },
+        }),
+      );
+
+      expect(decision.allowed).toBe(false);
+      expect(decision.reason).toBe(DenialReason.INDIVIDUAL_DATA_RESTRICTED);
+    });
+
+    it('reports revocation ahead of an individual-data request', () => {
+      const decision = engine.checkAccess(
+        input({ requestedAggregationLevel: AggregationLevel.INDIVIDUAL }),
+        permission({ status: PermissionStatus.REVOKED, revokedAt: PAST }),
+      );
+
+      expect(decision.reason).toBe(DenialReason.PERMISSION_REVOKED);
+    });
+  });
+
   describe('check ordering', () => {
     it('reports PERMISSION_REVOKED even when the purpose is also wrong', () => {
       // Revocation is the more significant fact; an auditor scanning denial

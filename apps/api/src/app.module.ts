@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { resolve } from 'path';
 import { loadAuthConfig, validateAuthConfig } from './config/configuration';
+import { loadAiConfig, validateAiConfig } from './config/ai.config';
 import { UsersModule } from './modules/users/users.module';
 import { CommunitiesModule } from './modules/communities/communities.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
@@ -15,6 +16,7 @@ import { BlockchainModule } from './modules/blockchain/blockchain.module';
 import { DatasetsModule } from './modules/datasets/datasets.module';
 import { AccessRequestsModule } from './modules/access-requests/access-requests.module';
 import { GovernanceModule } from './modules/governance/governance.module';
+import { AiModule } from './modules/ai/ai.module';
 import { HealthController } from './common/health.controller';
 
 @Module({
@@ -52,6 +54,12 @@ import { HealthController } from './common/health.controller';
 
         validateAuthConfig(loadAuthConfig(get));
 
+        // A blank AI_API_KEY is legal — the AI module answers deterministically
+        // and reports answerSource:'deterministic'. An unrecognised
+        // AI_PROVIDER is not: it would silently send the key nowhere useful
+        // and read as "the AI is broken" rather than "the env var is wrong".
+        validateAiConfig(loadAiConfig(get));
+
         return raw;
       },
     }),
@@ -77,6 +85,7 @@ import { HealthController } from './common/health.controller';
     DatasetsModule,
     AccessRequestsModule,
     GovernanceModule,
+    AiModule,
   ],
   controllers: [HealthController],
 })

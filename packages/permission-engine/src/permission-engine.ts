@@ -86,6 +86,24 @@ export class PermissionEngine {
       return this.deny(DenialReason.INDIVIDUAL_DATA_RESTRICTED, permission);
     }
 
+    // 9. An explicit request for finer granularity than the grant covers.
+    //
+    //    The check above catches a misconfigured grant. This one catches the
+    //    case the demo lives on: a caller that is otherwise fully authorized
+    //    for a community dataset asking for member-level rows. Resource
+    //    aggregation alone cannot express that, because the resource really
+    //    is community-level — the request is for something the resource does
+    //    not contain.
+    //
+    //    Denying here means the refusal is a decision with a reason and an
+    //    audit row, rather than an empty result the caller has to interpret.
+    if (
+      input.requestedAggregationLevel === AggregationLevel.INDIVIDUAL &&
+      permission.conditions?.allowIndividualData !== true
+    ) {
+      return this.deny(DenialReason.INDIVIDUAL_DATA_RESTRICTED, permission);
+    }
+
     return {
       allowed: true,
       permissionId: permission.id,

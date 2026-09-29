@@ -19,6 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@braice/ai-client": "workspace:*",
     "@braice/blockchain-client": "workspace:*",
     "@braice/permission-engine": "workspace:*",
     "@nestjs/common": "^10.0.0",
