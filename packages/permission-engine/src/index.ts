@@ -1,2 +1,2 @@
-// Permission engine package index
-// Re-exports all public APIs
+export * from './types';
+export { PermissionEngine, permissionEngine } from './permission-engine';

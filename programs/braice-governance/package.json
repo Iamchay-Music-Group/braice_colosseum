@@ -1,0 +1,13 @@
+{
+  "name": "@braice/governance-program",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Test harness for the BRAICE governance Solana program",
+  "scripts": {
+    "test:integration": "node tests/anchor-integration.js"
+  },
+  "devDependencies": {
+    "@braice/blockchain-client": "workspace:*",
+    "@solana/web3.js": "^1.95.3"
+  }
+}

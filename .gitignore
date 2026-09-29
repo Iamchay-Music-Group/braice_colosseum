@@ -7,10 +7,24 @@ dist/
 build/
 .turbo/
 
+# Compiled output that landed in a package's src/ instead of dist/, from a
+# tsc run against a config without outDir. Each package's `main` points at
+# dist/, so these are unreachable dead weight that would shadow the .ts
+# sources in any resolver that prefers .js.
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+!packages/*/src/**/*.d.ts.ts
+
 # Environment
 .env
 .env.local
 .env.*.local
+# Backups and shadow copies of env files hold real credentials; only commit
+# .env.example. Without this, a `cp .env .env.bak` leaks secrets into git.
+.env.*
+!.env.example
 
 # IDE
 .vscode/

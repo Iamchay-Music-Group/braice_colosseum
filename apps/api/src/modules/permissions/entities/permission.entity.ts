@@ -1,33 +1,87 @@
-// Permission entity
-// PostgreSQL table: permissions
-// Columns:
-// - id: UUID primary key
-// - access_request_id: UUID not null FK -> access_requests(id)
-// - principal_id: UUID not null FK -> users(id) (who is authorized)
-// - resource_id: UUID not null FK -> community_datasets(id) (what data)
-// - purpose: TEXT not null (why - must match request purpose)
-// - operation: TEXT not null (how - READ, ANALYZE)
-// - conditions: JSONB not null
-//   {
-//     "aggregationLevel": "COMMUNITY",
-//     "allowIndividualData": false
-//   }
-// - issued_at: TIMESTAMPTZ not null
-// - expires_at: TIMESTAMPTZ not null
-// - revoked_at: TIMESTAMPTZ nullable
-// - status: TEXT not null (PENDING, ACTIVE, EXPIRED, REVOKED)
-// - policy_hash: TEXT (SHA-256 of permission JSON for blockchain)
-// - blockchain_reference: TEXT (Solana transaction signature)
-//
-// A permission answers:
-// - WHO? (principal)
-// - WHAT? (resource)
-// - WHY? (purpose)
-// - HOW? (operation)
-// - FOR HOW LONG? (expires_at)
-// - UNDER WHAT CONDITIONS? (conditions)
-//
-// Relations:
-// - accessRequest: ManyToOne -> AccessRequest
-// - principal: ManyToOne -> User
-// - resource: ManyToOne -> CommunityDataset
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  Index,
+  CreateDateColumn,
+  ManyToOne,
+  JoinColumn,
+} from 'typeorm';
+import { User } from '../../users/entities/user.entity';
+import { CommunityDataset } from '../../datasets/entities/community-dataset.entity';
+import { AccessRequest } from '../../access-requests/entities/access-request.entity';
+import { PermissionStatus, Operation } from '../../../common/interfaces/permission.interface';
+import type { PermissionConditions } from '@braice/permission-engine';
+
+/**
+ * The central BRAICE object.
+ *
+ * A permission answers WHO, WHAT, WHY, HOW, FOR HOW LONG, and UNDER WHAT
+ * CONDITIONS. It is an enforceable policy, not a database flag: it carries a
+ * policy hash that anchors it to on-chain state.
+ */
+@Entity('permissions')
+@Index('idx_permissions_lookup', ['principalId', 'resourceId', 'status'])
+export class Permission {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'access_request_id', type: 'uuid' })
+  accessRequestId!: string;
+
+  @Column({ name: 'principal_id', type: 'uuid' })
+  principalId!: string;
+
+  @Column({ name: 'resource_id', type: 'uuid' })
+  resourceId!: string;
+
+  @Column({ type: 'text' })
+  purpose!: string;
+
+  /**
+   * Singular to match the `permissions.operation` column. The original design
+   * comment described an `operations` array, but the schema and DTOs are
+   * single-valued, so widening it would need a migration for no benefit.
+   */
+  @Column({ type: 'text' })
+  operation!: Operation;
+
+  /**
+   * Server-written only. `allowIndividualData` is always false; nothing on a
+   * request path can construct a permission that sets it true.
+   */
+  @Column({ type: 'jsonb', nullable: true })
+  conditions!: PermissionConditions;
+
+  @Column({ name: 'issued_at', type: 'timestamptz' })
+  issuedAt!: Date;
+
+  @Column({ name: 'expires_at', type: 'timestamptz' })
+  expiresAt!: Date;
+
+  @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
+  revokedAt!: Date | null;
+
+  @Column({ type: 'text' })
+  status!: PermissionStatus;
+
+  /** SHA-256 of the canonical permission JSON; anchors the permission on-chain. */
+  @Column({ name: 'policy_hash', type: 'text', nullable: true })
+  policyHash!: string | null;
+
+  /** Solana transaction signature. Null when the chain is unavailable. */
+  @Column({ name: 'blockchain_reference', type: 'text', nullable: true })
+  blockchainReference!: string | null;
+
+  @ManyToOne(() => AccessRequest, (request) => request.permissions)
+  @JoinColumn({ name: 'access_request_id' })
+  accessRequest!: AccessRequest;
+
+  @ManyToOne(() => User, (user) => user.permissions)
+  @JoinColumn({ name: 'principal_id' })
+  principal!: User;
+
+  @ManyToOne(() => CommunityDataset, (dataset) => dataset.permissions)
+  @JoinColumn({ name: 'resource_id' })
+  resource!: CommunityDataset;
+}

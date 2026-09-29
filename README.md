@@ -275,8 +275,12 @@ docker ps
 # Create environment file
 cp .env.example .env
 
-# Edit .env with your settings
-# Minimum required: database credentials (defaults work for local)
+# Generate the one value you must supply yourself:
+openssl rand -base64 48
+
+# Paste it into JWT_SECRET. The API refuses to boot without a >= 32 character
+# value, so a weak or missing key is a startup error rather than a runtime
+# surprise. Everything else has a working local default.
 ```
 
 **.env defaults for local development:**
@@ -284,7 +288,20 @@ cp .env.example .env
 NODE_ENV=development
 PORT=3001
 
-DATABASE_URL=postgresql://braice:braice_secret@localhost:5432/braice_db
+DATABASE_URL=postgresql://braice:braice_secret@localhost:5433/braice_db
+
+# REQUIRED — no default. openssl rand -base64 48
+JWT_SECRET=
+JWT_TTL_SECONDS=900
+
+PASSWORD_MAX_ATTEMPTS=10
+PASSWORD_LOCKOUT_SECONDS=900
+PASSWORD_SCRYPT_COST=15
+
+# Off by default. A wallet is an on-chain anchoring attribute, not a login.
+WALLET_AUTH_ENABLED=false
+NONCE_TTL_SECONDS=300
+AUTH_DOMAIN=BRAICE
 
 SOLANA_RPC_URL=https://api.devnet.solana.com
 SOLANA_PROGRAM_ID=
@@ -407,6 +424,40 @@ braice_colosseum_bend/
 
 ## API Endpoints
 
+### Authentication
+Email + password is the credential. Solana is not a credential — a wallet is
+only an on-chain anchoring attribute, and attaching one requires proving
+control of the private key.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/auth/register | Create account (always `MEMBER`) and sign in |
+| POST | /api/auth/login | Exchange email + password for a JWT |
+| GET | /api/auth/me | Current account from the token |
+| POST | /api/auth/password | Rotate own password (needs current one) |
+| POST | /api/auth/wallet/challenge | Issue a challenge to prove wallet ownership |
+| POST | /api/auth/wallet/link | Attach a proven wallet to the caller's account |
+
+Optional wallet sign-in, off unless `WALLET_AUTH_ENABLED=true`. It only
+authenticates a wallet that is **already linked** to an account — it can never
+create one.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/auth/nonce | Request challenge (requires flag) |
+| POST | /api/auth/verify | Sign nonce (requires flag, linked wallet only) |
+
+### Users
+Read-only. There is no `POST /api/users` — the old version was
+unauthenticated and accepted an arbitrary `userType`, so anyone could
+self-register as a `CREATOR`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/users | List users |
+| GET | /api/users/:id | Get user |
+| GET | /api/users/wallet/:address | Get user by linked wallet |
+
 ### Community
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -459,9 +510,18 @@ braice_colosseum_bend/
 ## Key Security Rules
 
 1. **Never trust the client** — All authorization happens server-side
-2. **AI has no database access** — Only permission-aware tools
-3. **Activity records are protected** — Never exposed to brands or AI
-4. **Blockchain is for verification** — Not the primary database
+2. **Roles are never self-assigned** — `POST /api/auth/register` always creates
+   a `MEMBER`; roles move only through governance
+3. **Passwords are stored as scrypt digests** — `password_hash` is
+   `select: false`, so it is never loaded outside the login path
+4. **Lockout state is private** — `failed_login_attempts` and `locked_until` are
+   also `select: false`; publishing them would tell an attacker how many guesses
+   remain
+5. **AI has no database access** — Only permission-aware tools
+6. **Activity records are protected** — Never exposed to brands or AI
+7. **Blockchain is for verification** — Not the primary database, and not a
+   credential. A grant whose principal has no linked wallet is still fully
+   enforceable off-chain; it is simply not anchored.
 
 ---
 

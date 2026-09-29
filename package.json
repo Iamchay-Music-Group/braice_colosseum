@@ -4,15 +4,19 @@
   "private": true,
   "description": "BRAICE - Community Governance Permission Infrastructure",
   "scripts": {
-    "dev": "pnpm --filter @braice/api dev",
-    "build": "pnpm --filter @braice/api build",
+    "dev": "pnpm build:engine && pnpm build:client && pnpm --filter @braice/api dev",
+    "build": "pnpm build:engine && pnpm build:client && pnpm --filter @braice/api build",
     "start": "pnpm --filter @braice/api start:prod",
-    "test": "pnpm --filter @braice/api test",
+    "test": "pnpm build:engine && pnpm build:client && pnpm --filter @braice/api test",
     "lint": "pnpm --filter @braice/api lint",
     "seed": "pnpm --filter @braice/api seed:demo",
     "db:migrate": "pnpm --filter @braice/api db:migrate",
     "db:seed": "pnpm --filter @braice/api db:seed",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "demo": "bash scripts/demo-walkthrough.sh",
+    "typecheck": "pnpm build:engine && pnpm build:client && pnpm --filter @braice/api typecheck",
+    "build:engine": "pnpm --filter @braice/permission-engine build",
+    "build:client": "pnpm --filter @braice/blockchain-client build"
   }
 }

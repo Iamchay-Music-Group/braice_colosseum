@@ -5,7 +5,20 @@ description = "BRAICE Governance Solana Program"
 edition = "2021"
 
 [lib]
+name = "braice_governance"
 crate-type = ["cdylib", "lib"]
 
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+idl-build = ["anchor-lang/idl-build"]
+
 [dependencies]
-anchor-lang = "0.29.0"
+# Pinned to the same version as the anchor CLI used to build the workspace
+# (1.1.2). Mixing a 0.2x anchor-lang with a 1.x CLI produces an IDL the CLI
+# refuses to parse, so these two versions are deliberately kept in lockstep.
+anchor-lang = "1.1.2"
+
+[dev-dependencies]
+solana-program = "3.0.0"

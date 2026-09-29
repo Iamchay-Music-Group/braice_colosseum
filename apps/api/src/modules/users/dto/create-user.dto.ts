@@ -1,6 +1,17 @@
-import { IsString, IsOptional, IsEnum, IsEmail } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
+/**
+ * Account roles.
+ *
+ * CREATOR, BRAND and APPLICATION describe a user's relationship to a
+ * community; they are assigned by governance or an operator tool, never by the
+ * person registering. `POST /api/auth/register` always creates a MEMBER.
+ *
+ * Note there is no ADMIN here. Administrative capability is a permission in
+ * the authorization module, not a role a signup can claim — which is the
+ * whole reason the old public `POST /api/users` endpoint (which accepted an
+ * arbitrary userType, CREATOR included) was removed.
+ */
 export enum CreateUserType {
   CREATOR = 'CREATOR',
   MEMBER = 'MEMBER',
@@ -8,22 +19,17 @@ export enum CreateUserType {
   APPLICATION = 'APPLICATION',
 }
 
-export class CreateUserDto {
-  @ApiProperty({ example: 'Afrobeat King', description: 'Display name of the user' })
-  @IsString()
-  displayName!: string;
+export const USER_TYPE_VALUES: readonly CreateUserType[] = [
+  CreateUserType.CREATOR,
+  CreateUserType.MEMBER,
+  CreateUserType.BRAND,
+  CreateUserType.APPLICATION,
+];
 
-  @ApiPropertyOptional({ example: 'wallet_abc123', description: 'Solana wallet address' })
-  @IsOptional()
-  @IsString()
-  walletAddress?: string;
-
-  @ApiPropertyOptional({ example: 'user@example.com', description: 'Email address' })
-  @IsOptional()
-  @IsEmail()
-  email?: string;
-
-  @ApiProperty({ enum: CreateUserType, example: CreateUserType.CREATOR, description: 'User type' })
-  @IsEnum(CreateUserType)
-  userType!: CreateUserType;
-}
+/** Swagger metadata for the enum, kept alongside it so the two stay in sync. */
+export const UserTypeApiProperty = () =>
+  ApiProperty({
+    enum: USER_TYPE_VALUES,
+    example: CreateUserType.MEMBER,
+    description: 'Account role, assigned by governance rather than by the user',
+  });

@@ -110,16 +110,16 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_memberships_community ON memberships(community_id);
-CREATE INDEX idx_memberships_user ON memberships(user_id);
-CREATE INDEX idx_activity_community ON activity_records(community_id);
-CREATE INDEX idx_activity_member ON activity_records(member_id);
-CREATE INDEX idx_datasets_community ON community_datasets(community_id);
-CREATE INDEX idx_access_requests_community ON access_requests(community_id);
-CREATE INDEX idx_access_requests_requester ON access_requests(requester_id);
-CREATE INDEX idx_governance_access_request ON governance_decisions(access_request_id);
-CREATE INDEX idx_permissions_principal ON permissions(principal_id);
-CREATE INDEX idx_permissions_resource ON permissions(resource_id);
-CREATE INDEX idx_permissions_status ON permissions(status);
-CREATE INDEX idx_audit_community ON audit_events(community_id);
-CREATE INDEX idx_audit_event_type ON audit_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_memberships_community ON memberships(community_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_user ON memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_community ON activity_records(community_id);
+CREATE INDEX IF NOT EXISTS idx_activity_member ON activity_records(member_id);
+CREATE INDEX IF NOT EXISTS idx_datasets_community ON community_datasets(community_id);
+CREATE INDEX IF NOT EXISTS idx_access_requests_community ON access_requests(community_id);
+CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_id);
+CREATE INDEX IF NOT EXISTS idx_governance_access_request ON governance_decisions(access_request_id);
+CREATE INDEX IF NOT EXISTS idx_permissions_principal ON permissions(principal_id);
+CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions(resource_id);
+CREATE INDEX IF NOT EXISTS idx_permissions_status ON permissions(status);
+CREATE INDEX IF NOT EXISTS idx_audit_community ON audit_events(community_id);
+CREATE INDEX IF NOT EXISTS idx_audit_event_type ON audit_events(event_type);

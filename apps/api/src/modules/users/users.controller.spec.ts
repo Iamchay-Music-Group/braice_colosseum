@@ -1,16 +1,19 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, NotFoundException, ValidationPipe } from '@nestjs/common';
 import request = require('supertest');
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 describe('UsersController (e2e)', () => {
   let app: INestApplication;
-  let usersService: { create: jest.Mock; findAll: jest.Mock; findById: jest.Mock; findByWallet: jest.Mock };
+  let usersService: {
+    findAll: jest.Mock;
+    findById: jest.Mock;
+    findByWallet: jest.Mock;
+  };
 
   beforeAll(async () => {
     usersService = {
-      create: jest.fn(),
       findAll: jest.fn(),
       findById: jest.fn(),
       findByWallet: jest.fn(),
@@ -23,7 +26,9 @@ describe('UsersController (e2e)', () => {
 
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -32,39 +37,23 @@ describe('UsersController (e2e)', () => {
   beforeEach(() => jest.clearAllMocks());
 
   describe('POST /api/users', () => {
-    it('should create a user', () => {
-      const user = { id: 'uuid-1', displayName: 'Test', userType: 'MEMBER', createdAt: new Date() };
-      usersService.create.mockResolvedValue(user);
-
-      return request(app.getHttpServer())
+    // This endpoint used to be public and accepted an arbitrary userType,
+    // which let anyone self-register as a CREATOR. Account creation now
+    // lives at POST /api/auth/register, which takes email + password and
+    // always creates a MEMBER.
+    it('no longer exists', async () => {
+      await request(app.getHttpServer())
         .post('/api/users')
-        .send({ displayName: 'Test', userType: 'MEMBER' })
-        .expect(201)
-        .expect((res: any) => {
-          expect(res.body.id).toBe('uuid-1');
-          expect(res.body.displayName).toBe('Test');
-        });
+        .send({ displayName: 'Attacker', userType: 'CREATOR' })
+        .expect(404);
     });
 
-    it('should reject invalid userType', () => {
-      return request(app.getHttpServer())
+    it('cannot be reached to mint a privileged account', async () => {
+      const res = await request(app.getHttpServer())
         .post('/api/users')
-        .send({ displayName: 'Test', userType: 'INVALID' })
-        .expect(400);
-    });
+        .send({ displayName: 'Attacker', userType: 'CREATOR' });
 
-    it('should reject missing displayName', () => {
-      return request(app.getHttpServer())
-        .post('/api/users')
-        .send({ userType: 'MEMBER' })
-        .expect(400);
-    });
-
-    it('should reject unknown fields', () => {
-      return request(app.getHttpServer())
-        .post('/api/users')
-        .send({ displayName: 'Test', userType: 'MEMBER', extra: 'field' })
-        .expect(400);
+      expect(res.status).not.toBe(201);
     });
   });
 
@@ -96,7 +85,6 @@ describe('UsersController (e2e)', () => {
     });
 
     it('should return 404 for missing user', () => {
-      const { NotFoundException } = require('@nestjs/common');
       usersService.findById.mockRejectedValue(new NotFoundException());
 
       return request(app.getHttpServer())
@@ -115,6 +103,20 @@ describe('UsersController (e2e)', () => {
         .expect(200)
         .expect((res: any) => {
           expect(res.body.walletAddress).toBe('wallet_abc');
+        });
+    });
+
+    // `wallet/:address` must be declared before `:id`, otherwise the wallet
+    // route is shadowed and the two-segment path 404s.
+    it('is not shadowed by the :id route', () => {
+      usersService.findByWallet.mockResolvedValue({ id: 'uuid-1' });
+
+      return request(app.getHttpServer())
+        .get('/api/users/wallet/wallet_abc')
+        .expect(200)
+        .expect(() => {
+          expect(usersService.findByWallet).toHaveBeenCalled();
+          expect(usersService.findById).not.toHaveBeenCalled();
         });
     });
   });

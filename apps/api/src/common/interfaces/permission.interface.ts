@@ -1,33 +1,23 @@
-export enum PermissionStatus {
-  PENDING = 'PENDING',
-  ACTIVE = 'ACTIVE',
-  EXPIRED = 'EXPIRED',
-  REVOKED = 'REVOKED',
-}
+/**
+ * Re-exports of the canonical permission types.
+ *
+ * These enums are DEFINED in packages/permission-engine and re-exported here
+ * so there is exactly one definition of "what an Operation is". The engine
+ * previously had its own copy of these enums alongside this file, which meant
+ * a change to one would silently not apply to the other.
+ */
+export {
+  PermissionStatus,
+  Operation,
+  PrincipalType,
+  AggregationLevel,
+  DenialReason,
+} from '@braice/permission-engine';
 
-export enum Operation {
-  READ = 'READ',
-  ANALYZE = 'ANALYZE',
-  EXPORT = 'EXPORT',
-}
-
-export interface PermissionConditions {
-  aggregationLevel?: string;
-  allowIndividualData: boolean;
-}
-
-export interface Permission {
-  id: string;
-  accessRequestId: string;
-  principalId: string;
-  resourceId: string;
-  purpose: string;
-  operation: Operation;
-  conditions?: PermissionConditions;
-  issuedAt: Date;
-  expiresAt: Date;
-  revokedAt?: Date;
-  status: PermissionStatus;
-  policyHash?: string;
-  blockchainReference?: string;
-}
+export type {
+  PermissionConditions,
+  Permission as EnginePermission,
+  ProtectedResource,
+  AccessEvaluationInput,
+  AuthorizationDecision,
+} from '@braice/permission-engine';

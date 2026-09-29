@@ -1,7 +1,11 @@
-// Audit module
-// - Imports TypeOrmModule for AuditEvent entity
-// - Provides AuditService
-// - Controllers: AuditController
-//
-// Records all governance/authorization events.
-// Links to Solana transaction hashes for verifiable state.
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditEvent } from './entities/audit-event.entity';
+import { AuditService } from './audit.service';
+
+@Module({
+  imports: [TypeOrmModule.forFeature([AuditEvent])],
+  providers: [AuditService],
+  exports: [AuditService],
+})
+export class AuditModule {}

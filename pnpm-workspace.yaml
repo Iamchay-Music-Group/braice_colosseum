@@ -1,6 +1,12 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # The Anchor workspace carries a package.json purely so its integration test
+  # can resolve the client and web3.js. The Rust code itself is built by cargo,
+  # not pnpm.
+  - "programs/*"
 allowBuilds:
-  '@nestjs/core': set this to true or false
+  '@nestjs/core': true
   '@scarf/scarf': false
+  bufferutil: false
+  utf-8-validate: false

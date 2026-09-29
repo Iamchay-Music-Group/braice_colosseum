@@ -10,6 +10,8 @@ import {
 import { User } from '../../users/entities/user.entity';
 import { Membership } from '../../memberships/entities/membership.entity';
 import { ActivityRecord } from '../../activity/entities/activity-record.entity';
+import { CommunityDataset } from '../../datasets/entities/community-dataset.entity';
+import { AccessRequest } from '../../access-requests/entities/access-request.entity';
 
 @Entity('communities')
 export class Community {
@@ -40,4 +42,10 @@ export class Community {
 
   @OneToMany(() => ActivityRecord, (activity) => activity.community)
   activityRecords!: ActivityRecord[];
+
+  @OneToMany(() => CommunityDataset, (dataset) => dataset.community)
+  datasets!: CommunityDataset[];
+
+  @OneToMany(() => AccessRequest, (request) => request.community)
+  accessRequests!: AccessRequest[];
 }

@@ -8,6 +8,12 @@ export {
 export {
   PermissionStatus,
   Operation,
+  PrincipalType,
+  AggregationLevel,
+  DenialReason,
   PermissionConditions,
-  Permission,
+  EnginePermission as Permission,
+  ProtectedResource,
+  AccessEvaluationInput,
+  AuthorizationDecision,
 } from './permission.interface';
