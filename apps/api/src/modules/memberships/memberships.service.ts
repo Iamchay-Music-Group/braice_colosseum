@@ -45,7 +45,34 @@ export class MembershipsService {
     return this.membershipRepo.save(membership);
   }
 
+  /**
+   * Leave a community.
+   *
+   * An operator cannot leave their own community. There is no route to transfer
+   * ownership, so allowing it would leave a community with nobody able to
+   * approve an access request, mint a permission, or anchor a decision on-chain
+   * — permanently, and with no route back. Refusing is the only safe answer
+   * until ownership transfer exists; this should become a 409-with-a-transfer-
+   * flow rather than a permanent ban the day it does.
+   *
+   * Membership removal by an operator is a different route (removeMember) and is
+   * unaffected: an operator may remove an ordinary member, just not themselves.
+   */
   async leave(communityId: string, userId: string): Promise<void> {
+    const community = await this.communityRepo.findOne({
+      where: { id: communityId },
+    });
+
+    if (!community) {
+      throw new NotFoundException('Community not found');
+    }
+
+    if (community.operatorId === userId) {
+      throw new ForbiddenException(
+        'An operator cannot leave their own community',
+      );
+    }
+
     const membership = await this.membershipRepo.findOne({
       where: { communityId, userId },
     });

@@ -55,11 +55,23 @@ export class CommunitiesController {
   })
   @ApiCreatedResponse({ description: 'Community created' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
-  create(
+  async create(
     @Body() dto: CreateCommunityDto,
     @CurrentPrincipal() principal: JwtPayload,
   ) {
-    return this.communitiesService.create(dto, principal.sub);
+    const community = await this.communitiesService.create(dto, principal.sub);
+
+    // Projected through the same shape as the two GET routes. Returning the raw
+    // entity leaked `operatorId`, which those routes strip on purpose so that
+    // listing communities cannot be used to work out who runs them. The caller
+    // learns nothing here that the follow-up GET does not already withhold.
+    return {
+      id: community.id,
+      name: community.name,
+      description: community.description,
+      governanceConfig: community.governanceConfig,
+      createdAt: community.createdAt,
+    };
   }
 
   @Get()

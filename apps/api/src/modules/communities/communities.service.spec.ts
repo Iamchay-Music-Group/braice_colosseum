@@ -4,6 +4,7 @@ import { NotFoundException } from '@nestjs/common';
 import { Repository, ObjectLiteral } from 'typeorm';
 import { CommunitiesService } from './communities.service';
 import { Community } from './entities/community.entity';
+import { Membership } from '../memberships/entities/membership.entity';
 import { CreateCommunityDto } from './dto/create-community.dto';
 
 type MockRepo<T extends ObjectLiteral = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
@@ -15,20 +16,43 @@ const mockRepo = (): MockRepo => ({
   save: jest.fn(),
 });
 
+/**
+ * create() runs inside a transaction and reaches the community through
+ * `repo.manager`, so the Community mock has to expose an EntityManager-shaped
+ * surface. Everything the transaction touches is recorded here for assertions.
+ */
+function mockManager() {
+  const manager = {
+    create: jest.fn((_entity: unknown, data: unknown) => data),
+    save: jest.fn(async (entity: unknown) => entity),
+  };
+  const transaction = jest.fn(
+    async (cb: (m: typeof manager) => Promise<unknown>) => cb(manager),
+  );
+  return { manager: { transaction }, managerSpies: manager, transaction };
+}
+
 describe('CommunitiesService', () => {
   let service: CommunitiesService;
-  let repo: MockRepo<Community>;
+  // `manager` is overridden: create() goes through repo.manager.transaction, so
+  // it needs an EntityManager shape rather than the flat jest.Mock MockRepo gives.
+  let repo: Omit<MockRepo<Community>, 'manager'> & {
+    manager: { transaction: jest.Mock };
+  };
+  let tx: ReturnType<typeof mockManager>;
 
   beforeEach(async () => {
+    tx = mockManager();
+    repo = { ...mockRepo(), manager: { transaction: tx.transaction } };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommunitiesService,
-        { provide: getRepositoryToken(Community), useValue: mockRepo() },
+        { provide: getRepositoryToken(Community), useValue: repo },
       ],
     }).compile();
 
     service = module.get(CommunitiesService);
-    repo = module.get(getRepositoryToken(Community));
   });
 
   it('should be defined', () => {
@@ -41,20 +65,67 @@ describe('CommunitiesService', () => {
         name: 'Afrobeat Creators',
         governanceConfig: { approvalMode: 'CREATOR_AND_THRESHOLD', thresholdPercentage: 60 },
       };
-      const saved = { id: 'comm-1', name: 'Afrobeat Creators', operatorId: 'operator-uuid', governanceConfig: dto.governanceConfig };
+      const saved = { id: 'comm-1', name: 'Afrobeat Creators', description: null, operatorId: 'operator-uuid', governanceConfig: dto.governanceConfig };
 
-      repo.create!.mockReturnValue(saved);
-      repo.save!.mockResolvedValue(saved);
+      tx.managerSpies.create.mockImplementation((_e: unknown, data: unknown) => ({ ...(data as object), id: 'comm-1' }));
 
       const result = await service.create(dto, 'operator-uuid');
 
       expect(result).toEqual(saved);
-      expect(repo.create).toHaveBeenCalledWith({
+      expect(tx.managerSpies.create).toHaveBeenCalledWith(Community, {
         name: 'Afrobeat Creators',
         description: null,
         operatorId: 'operator-uuid',
         governanceConfig: dto.governanceConfig,
       });
+    });
+
+    it('enrols the operator as an ACTIVE OPERATOR member', async () => {
+      // The bug this guards: creating a community left its operator off the
+      // roster, so the creator saw a Join button on their own community and the
+      // member count read 0.
+      const dto: CreateCommunityDto = {
+        name: 'Afrobeat Creators',
+        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+      };
+
+      tx.managerSpies.create.mockImplementation((_e: unknown, data: unknown) => ({ ...(data as object), id: 'comm-9' }));
+
+      await service.create(dto, 'operator-uuid');
+
+      expect(tx.managerSpies.create).toHaveBeenCalledWith(Membership, {
+        communityId: 'comm-9',
+        userId: 'operator-uuid',
+        role: 'OPERATOR',
+        status: 'ACTIVE',
+      });
+      expect(tx.managerSpies.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('enrols the operator inside the same transaction as the community', async () => {
+      // A community that exists without its operator enrolled is the broken
+      // state, so it must never be observable even momentarily.
+      const dto: CreateCommunityDto = {
+        name: 'Afrobeat Creators',
+        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+      };
+
+      await service.create(dto, 'operator-uuid');
+
+      expect(tx.transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not persist a community when enrolling the operator fails', async () => {
+      const dto: CreateCommunityDto = {
+        name: 'Afrobeat Creators',
+        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+      };
+
+      tx.managerSpies.save
+        .mockResolvedValueOnce({ id: 'comm-1' } as never)
+        .mockRejectedValueOnce(new Error('enrol failed') as never);
+
+      await expect(service.create(dto, 'operator-uuid')).rejects.toThrow('enrol failed');
     });
 
     it('should include description when provided', async () => {
@@ -64,12 +135,10 @@ describe('CommunitiesService', () => {
         governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
       };
 
-      repo.create!.mockReturnValue({});
-      repo.save!.mockResolvedValue({});
-
       await service.create(dto, 'op-1');
 
-      expect(repo.create).toHaveBeenCalledWith(
+      expect(tx.managerSpies.create).toHaveBeenCalledWith(
+        Community,
         expect.objectContaining({ description: 'A test community' }),
       );
     });

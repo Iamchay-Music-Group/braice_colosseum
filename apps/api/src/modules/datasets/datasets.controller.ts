@@ -33,6 +33,7 @@ import {
   CurrentPrincipal,
   JwtAuthGuard,
 } from '../../common/guards/jwt-auth.guard';
+import { ParseUuidPipe } from '../../common/pipes/parse-uuid.pipe';
 import type { JwtPayload } from '../auth/auth.service';
 
 /**
@@ -102,12 +103,13 @@ export class DatasetsController {
   })
   @ApiParam({ name: 'communityId', description: 'Community UUID' })
   @ApiOkResponse({ description: 'Dataset metadata for the community' })
+  @ApiBadRequestResponse({ description: 'communityId is not a uuid' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   @ApiForbiddenResponse({
     description: 'Caller is not a member or the operator',
   })
   async findByCommunity(
-    @Param('communityId') communityId: string,
+    @Param('communityId', ParseUuidPipe) communityId: string,
     @CurrentPrincipal() principal: JwtPayload,
   ): Promise<DatasetSummary[]> {
     const community = await this.datasetsService.findCommunity(communityId);

@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Repository, ObjectLiteral } from 'typeorm';
 import { MembershipsService } from './memberships.service';
 import { Membership } from './entities/membership.entity';
@@ -71,6 +75,8 @@ describe('MembershipsService', () => {
 
   describe('leave', () => {
     it('should remove a membership', async () => {
+      // Not the operator: communityRepo answers with a different operatorId.
+      communityRepo.findOne!.mockResolvedValue({ id: 'comm-1', operatorId: 'someone-else' });
       const membership = { id: 'mem-1' };
       repo.findOne!.mockResolvedValue(membership);
       repo.remove!.mockResolvedValue(membership);
@@ -81,9 +87,27 @@ describe('MembershipsService', () => {
     });
 
     it('should throw NotFoundException for missing membership', async () => {
+      communityRepo.findOne!.mockResolvedValue({ id: 'comm-1', operatorId: 'someone-else' });
       repo.findOne!.mockResolvedValue(null);
 
       await expect(service.leave('comm-1', 'user-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw NotFoundException when the community does not exist', async () => {
+      communityRepo.findOne!.mockResolvedValue(null);
+
+      await expect(service.leave('comm-1', 'user-1')).rejects.toThrow(NotFoundException);
+      expect(repo.remove).not.toHaveBeenCalled();
+    });
+
+    it('should refuse to let an operator leave their own community', async () => {
+      // Leaving would leave nobody able to approve a request or mint a
+      // permission, and there is no ownership-transfer route to undo it.
+      communityRepo.findOne!.mockResolvedValue({ id: 'comm-1', operatorId: 'user-1' });
+      repo.findOne!.mockResolvedValue({ id: 'mem-1' });
+
+      await expect(service.leave('comm-1', 'user-1')).rejects.toThrow(ForbiddenException);
+      expect(repo.remove).not.toHaveBeenCalled();
     });
   });
 

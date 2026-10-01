@@ -48,9 +48,8 @@ db-psql: ## Open psql shell
 	docker-compose exec postgres psql -U braice -d braice_db
 
 # ─── Database ──────────────────────────────────────────────
-db-migrate: ## Run SQL migrations
-	PGPASSWORD=braice_secret psql -h localhost -p 5433 -U braice -d braice_db \
-		-f database/migrations/001_init.sql
+db-migrate: ## Run SQL migrations (all of database/migrations, in order, once)
+	pnpm db:migrate
 
 db-seed: ## Seed demo data via API (start API first)
 	@bash scripts/seed-demo.sh
