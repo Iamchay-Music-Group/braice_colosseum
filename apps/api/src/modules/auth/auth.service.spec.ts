@@ -5,6 +5,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -196,6 +197,7 @@ describe('AuthService', () => {
     >;
     recordSuccessfulLogin: jest.Mock<Promise<void>, [string]>;
     setPasswordHash: jest.Mock<Promise<void>, [string, string]>;
+    findById: jest.Mock<Promise<User>, [string]>;
   };
 
   beforeEach(async () => {
@@ -239,6 +241,11 @@ describe('AuthService', () => {
         .mockResolvedValue({ attempts: 1, lockedUntil: null }),
       recordSuccessfulLogin: jest.fn().mockResolvedValue(undefined),
       setPasswordHash: jest.fn().mockResolvedValue(undefined),
+      findById: jest.fn().mockImplementation(async (id: string) => ({
+        id,
+        email: 'someone@example.com',
+        userType: CreateUserType.MEMBER,
+      }) as User),
     };
 
     moduleRef = await Test.createTestingModule({
@@ -898,16 +905,6 @@ describe('AuthService', () => {
   });
 
   describe('replay protection', () => {
-    async function signIn(wallet: ReturnType<typeof makeWallet>) {
-      const issued = await service.requestNonce(wallet.publicKey);
-      const signature = wallet.sign(issued.message);
-      return service.verifySignature({
-        nonce: issued.nonce,
-        walletAddress: wallet.publicKey,
-        signature,
-      });
-    }
-
     beforeEach(async () => {
       const wallet = makeWallet();
       usersService.findByWalletOrNull.mockResolvedValue(
@@ -1029,6 +1026,96 @@ describe('AuthService', () => {
     it('rejects a garbage token', async () => {
       await expect(service.validateToken('not.a.jwt')).rejects.toThrow(
         UnauthorizedException,
+      );
+    });
+  });
+
+  describe('currentPrincipal', () => {
+    /**
+     * Signs in for real so the token under test is one this service issued,
+     * rather than a hand-built payload that might differ from the real shape.
+     */
+    async function signedInToken() {
+      usersService.findByEmailForAuth.mockResolvedValue(
+        await userWithPassword({ userType: CreateUserType.MEMBER }),
+      );
+      const { token } = await service.login({
+        email: 'creator@example.com',
+        password: GOOD_PASSWORD,
+      });
+      return service.validateToken(token);
+    }
+
+    // The bug this fixes: /auth/me echoed the token, so a role granted after
+    // sign-in was invisible until the next login. Governance promotes MEMBER to
+    // BRAND when it approves an access request, so a user could sit on a stale
+    // "Member" badge for the whole life of their token.
+    it('reports the role the account holds now, not the one frozen in the token', async () => {
+      const principal = await signedInToken();
+      expect(principal.userType).toBe(CreateUserType.MEMBER);
+
+      usersService.findById.mockResolvedValue(
+        await userWithPassword({ userType: CreateUserType.BRAND }),
+      );
+
+      const current = await service.currentPrincipal(principal);
+
+      expect(current.userType).toBe(CreateUserType.BRAND);
+    });
+
+    it('resolves the account from the verified token id', async () => {
+      const principal = await signedInToken();
+
+      await service.currentPrincipal(principal);
+
+      expect(usersService.findById).toHaveBeenCalledWith(principal.sub);
+    });
+
+    // sub/amr/jti/iat/exp describe the credential, not the account. They are
+    // returned exactly as issued — re-deriving them here would be a lie, and
+    // changing `jti` would break clients that key their session list on it.
+    it('passes the token claims through untouched', async () => {
+      const principal = await signedInToken();
+
+      usersService.findById.mockResolvedValue(
+        await userWithPassword({
+          userType: CreateUserType.BRAND,
+          email: 'renamed@example.com',
+        }),
+      );
+
+      const current = await service.currentPrincipal(principal);
+
+      expect(current.sub).toBe(principal.sub);
+      expect(current.amr).toBe(principal.amr);
+      expect(current.jti).toBe(principal.jti);
+      expect(current.iat).toBe(principal.iat);
+      expect(current.exp).toBe(principal.exp);
+      // Overlaid, because an email change is an account fact like any other.
+      expect(current.email).toBe('renamed@example.com');
+    });
+
+    // Nothing authorizes off this claim, which is why a stale one was only ever
+    // a display bug. Asserted so that stays true if the endpoint is extended.
+    it('cannot be used to escalate: the role comes from the database', async () => {
+      const principal = await signedInToken();
+
+      const current = await service.currentPrincipal({
+        ...principal,
+        userType: 'ADMIN',
+      });
+
+      expect(current.userType).toBe(CreateUserType.MEMBER);
+    });
+
+    it('propagates a missing account rather than inventing a principal', async () => {
+      const principal = await signedInToken();
+      usersService.findById.mockRejectedValue(
+        new NotFoundException('User user-1 not found'),
+      );
+
+      await expect(service.currentPrincipal(principal)).rejects.toThrow(
+        NotFoundException,
       );
     });
   });

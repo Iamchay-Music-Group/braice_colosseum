@@ -366,6 +366,38 @@ export class AuthService {
     return this.buildResult(user, 'wallet');
   }
 
+  /**
+   * The principal as it stands now, not as it stood at sign-in.
+   *
+   * Echoing the token back is wrong for any claim that describes the account
+   * rather than the token. `userType` moves without the account doing anything:
+   * governance promotes MEMBER to BRAND when it approves an access request, and
+   * an operator can change a membership role. A token is good for
+   * JWT_TTL_SECONDS, so a client reading the role off the token would show a
+   * promoted user the wrong role until they happened to sign in again — and
+   * would have no way to know its own view was out of date.
+   *
+   * So the account claims are re-read and overlaid, while the token claims are
+   * passed through untouched: `sub`, `amr`, `jti`, `iat` and `exp` are facts
+   * about the credential, and the database is not a better source for them than
+   * the signature already verified.
+   *
+   * This is a correctness fix to what the client is told, not a change in what
+   * the token can do. Nothing authorizes off `principal.userType`: permissions
+   * key off `principal.sub` and community authority is read live from
+   * `communities.operator_id`. Which is precisely why the stale value was only
+   * ever a display bug — it misled the user without granting anything.
+   */
+  async currentPrincipal(principal: JwtPayload): Promise<JwtPayload> {
+    const user = await this.usersService.findById(principal.sub);
+
+    return {
+      ...principal,
+      email: user.email,
+      userType: user.userType,
+    };
+  }
+
   private assertWalletAuthEnabled(): void {
     if (!this.walletAuthEnabled) {
       throw new ForbiddenException(

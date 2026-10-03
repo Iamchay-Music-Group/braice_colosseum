@@ -4,13 +4,14 @@ import {
   Delete,
   ForbiddenException,
   Get,
-  NotFoundException,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -21,6 +22,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { MembershipsService } from './memberships.service';
+import { AssignRoleDto } from './dto/assign-role.dto';
+import { MembershipRole } from './entities/membership-role.enum';
 import {
   CurrentPrincipal,
   JwtAuthGuard,
@@ -35,9 +38,14 @@ import type { JwtPayload } from '../auth/auth.service';
  * accepted one: POST /members could add any account to any community, and
  * DELETE /members/:userId could remove anyone, both unauthenticated.
  *
- * Leaving is self-service. Removing someone else is the operator's call, and is
+ * Leaving is self-service. Removing someone else is a moderator's call, and is
  * a separate, explicit route — collapsing the two would let any member evict a
  * competitor.
+ *
+ * Roles are assigned here rather than by anything the account itself posts. The
+ * column was previously written but never read or assignable, so a role was a
+ * label; it is now an enum with a documented capability per tier and a route
+ * that moves it.
  */
 @ApiTags('Memberships')
 @ApiBearerAuth()
@@ -70,7 +78,12 @@ export class MembershipsController {
   async join(
     @Param('communityId') communityId: string,
     @CurrentPrincipal() principal: JwtPayload,
-  ): Promise<{ id: string; communityId: string; userId: string; role: string }> {
+  ): Promise<{
+    id: string;
+    communityId: string;
+    userId: string;
+    role: MembershipRole;
+  }> {
     await this.membershipsService.assertCommunityExists(communityId);
 
     const membership = await this.membershipsService.join(
@@ -112,19 +125,76 @@ export class MembershipsController {
   }
 
   /**
+   * PATCH /api/communities/:communityId/members/:userId
+   *
+   * Assign a role. Operator only.
+   *
+   * `role: 'OPERATOR'` transfers the seat away from the caller rather than
+   * adding a second one — see MembershipsService.assignRole for why. `role:
+   * 'MODERATOR'` delegates eviction without authority to create authority, and
+   * `role: 'MEMBER'` is how a moderator is stood down.
+   */
+  @Patch(':userId')
+  @ApiOperation({
+    summary: 'Assign a community role (operator only)',
+    description:
+      'Sets the role of an existing member. OPERATOR is a transfer: the caller ' +
+      'gives up the seat in the same transaction, so the community always has ' +
+      'exactly one operator. MODERATOR may remove ordinary members but cannot ' +
+      'approve requests or issue permissions.',
+  })
+  @ApiParam({ name: 'communityId', description: 'Community UUID' })
+  @ApiParam({ name: 'userId', description: 'Member UUID to reassign' })
+  @ApiOkResponse({ description: 'Membership with the new role' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
+  @ApiNotFoundResponse({ description: 'Membership not found' })
+  @ApiForbiddenResponse({
+    description: 'Caller is not the operator of this community',
+  })
+  @ApiConflictResponse({ description: 'Target is not an active member' })
+  async assignRole(
+    @Param('communityId') communityId: string,
+    @Param('userId') userId: string,
+    @Body() dto: AssignRoleDto,
+    @CurrentPrincipal() principal: JwtPayload,
+  ): Promise<{
+    id: string;
+    communityId: string;
+    userId: string;
+    role: MembershipRole;
+  }> {
+    const membership = await this.membershipsService.assignRole(
+      communityId,
+      userId,
+      dto.role,
+      principal.sub,
+    );
+
+    return {
+      id: membership.id,
+      communityId: membership.communityId,
+      userId: membership.userId,
+      role: membership.role,
+    };
+  }
+
+  /**
    * DELETE /api/communities/:communityId/members/:userId
    *
-   * Operator-only removal, for moderation. Distinct from leaving on purpose:
-   * "I am removing you" and "I am leaving" are different acts with different
-   * authority behind them, and sharing one route meant either could be done by
-   * anyone.
+   * Removal, for moderation. Distinct from leaving on purpose: "I am removing
+   * you" and "I am leaving" are different acts with different authority behind
+   * them, and sharing one route meant either could be done by anyone.
+   *
+   * A moderator may do this, but only to an ordinary member: not to the
+   * operator, not to another moderator, and not to themselves.
    */
   @Delete(':userId')
   @ApiOperation({
-    summary: 'Remove a member (operator only)',
+    summary: 'Remove a member (operator or moderator)',
     description:
-      'Removes another member from the community. Restricted to the ' +
-      'community operator.',
+      'Removes another member from the community. The operator may remove ' +
+      'anyone but themselves and the operator seat; a moderator may remove ' +
+      'ordinary members only.',
   })
   @ApiParam({ name: 'communityId', description: 'Community UUID' })
   @ApiParam({ name: 'userId', description: 'Member UUID to remove' })
@@ -132,16 +202,15 @@ export class MembershipsController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   @ApiNotFoundResponse({ description: 'Membership not found' })
   @ApiForbiddenResponse({
-    description: 'Caller is not the operator of this community',
+    description: 'Caller may not remove this member',
   })
   async removeMember(
     @Param('communityId') communityId: string,
     @Param('userId') userId: string,
     @CurrentPrincipal() principal: JwtPayload,
   ): Promise<{ removed: true }> {
-    const community = await this.membershipsService.assertCommunityOperator(
+    const community = await this.membershipsService.assertCommunityExists(
       communityId,
-      principal.sub,
     );
 
     // Removing the operator is a lockout: the community would have nobody
@@ -152,6 +221,36 @@ export class MembershipsController {
         'The community operator cannot be removed. Transfer operator ' +
           'ownership before leaving.',
       );
+    }
+
+    // A moderator removing someone is delegation, so it is bounded on both
+    // sides: they cannot reach the seat, and they cannot remove a peer or
+    // themselves by this route. `DELETE /members/me` remains the self-service
+    // way out, so nothing is lost by refusing it here.
+    const isOperator = await this.membershipsService.isCommunityOperator(
+      communityId,
+      principal.sub,
+    );
+    const target = await this.membershipsService.findActiveMembership(
+      userId,
+      communityId,
+    );
+
+    if (!isOperator) {
+      const mayModerate = await this.membershipsService.canModerate(
+        communityId,
+        principal.sub,
+      );
+      const targetIsProtected =
+        target === null ||
+        target.role !== MembershipRole.MEMBER ||
+        userId === principal.sub;
+
+      if (!mayModerate || targetIsProtected) {
+        throw new ForbiddenException(
+          'A moderator may remove ordinary members only, and never themselves',
+        );
+      }
     }
 
     await this.membershipsService.leave(communityId, userId);
@@ -183,7 +282,12 @@ export class MembershipsController {
   async findMembers(
     @Param('communityId') communityId: string,
     @CurrentPrincipal() principal: JwtPayload,
-  ): Promise<{ id: string; userId: string; role: string; joinedAt: Date }[]> {
+  ): Promise<{
+    id: string;
+    userId: string;
+    role: MembershipRole;
+    joinedAt: Date;
+  }[]> {
     await this.membershipsService.assertCommunityExists(communityId);
 
     // An operator manages the roster and so needs to read it. Everyone else

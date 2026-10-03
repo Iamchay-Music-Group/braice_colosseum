@@ -1,7 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { PermissionsService } from './modules/permissions/permissions.service';
-import { AuditModule } from './modules/audit/audit.module';
 import { AuditService } from './modules/audit/audit.service';
 import { AuditController } from './modules/audit/audit.controller';
 

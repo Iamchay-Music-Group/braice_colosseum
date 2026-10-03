@@ -277,14 +277,23 @@ async function main(): Promise<void> {
   }
   log('members', `${memberIds.length} registered and enrolled`);
 
-  // The creator operates the community and must be an ACTIVE member for the
-  // creator's own vote to count toward the threshold.
+  // No join for the creator. Creating the community already wrote an ACTIVE
+  // OPERATOR membership for them, so their own vote counts toward the threshold
+  // without this — and joining again is a duplicate the route answers with a
+  // 409, which would abort the seed.
+
+  // The brand joins too, and it has to happen before step 6: asking for access
+  // to a community's data is something its members do, and the check reads live
+  // membership rather than the token. It also moves the community to
+  // MEMBER_COUNT + 2 active members, which is what the threshold in step 7 is
+  // computed against.
   await api(
     'POST',
     `/communities/${communityId}/members`,
     undefined,
-    creator.token,
+    brand.token,
   );
+  log('members', 'brand joined');
 
   // --- 4. Activity -------------------------------------------------------
   console.log(`\n4. Ingesting ${ACTIVITY_COUNT} individual activity records`);
@@ -348,12 +357,24 @@ async function main(): Promise<void> {
 
   // --- 7. Governance -----------------------------------------------------
   console.log('\n7. Governance: creator approves and threshold is met');
-  // The threshold is derived from live ACTIVE membership, and the creator is
-  // enrolled above, so the denominator is 101, not 100. Computing it from
-  // MEMBER_COUNT alone produced 60 approvals against a threshold of 61 and the
-  // request was silently REJECTED.
-  const enrolled = MEMBER_COUNT + 1;
+  // The threshold is derived from live ACTIVE membership, so the denominator is
+  // read from the community rather than computed from a constant. Arithmetic here
+  // has now been wrong twice: MEMBER_COUNT alone ignored the creator (who is
+  // enrolled as OPERATOR when the community is created), and MEMBER_COUNT + 1
+  // ignored the brand's join in step 3. Each produced a tally one or two votes
+  // short and a request that came back silently REJECTED — the failure looks
+  // exactly like a governance bug, which is why the number is fetched instead.
+  const enrolled = await api<number>(
+    'GET',
+    `/communities/${communityId}/member-count`,
+    undefined,
+    creator.token,
+  );
+
   const thresholdVotes = Math.ceil((enrolled * 60) / 100);
+  // The creator plus enough members to clear it. The brand is in the
+  // denominator as an active member but does not vote on its own request: a
+  // brand asking for access does not get to approve it.
   const approvers = [creatorUser.id, ...memberIds.slice(0, thresholdVotes - 1)];
 
   const decision = await api<{ decision: string; approvalCount: number; threshold: number }>(

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { AggregationLevel, DenialReason } from '@braice/permission-engine';
+import type { ImplementedAiProvider } from '@braice/ai-client';
 
 /**
  * The response contract for POST /api/ai/query.
@@ -27,6 +28,29 @@ export class AiResponseDto {
       'because no model is configured.',
   })
   answerSource!: 'llm' | 'deterministic';
+
+  @ApiPropertyOptional({
+    enum: ['openai', 'nvidia', 'ollama'],
+    example: 'nvidia',
+    description:
+      'Which provider wrote the answer. Absent unless answerSource is "llm". ' +
+      'Servers may configure an ordered provider chain, so this is how a caller ' +
+      'knows whether an open-weight model or a commercial one produced the text. ' +
+      'Only providers with a transport can appear: "anthropic" is a recognised ' +
+      'provider name but is not implemented, and is never selected. "ollama" ' +
+      'appears when the answer was written on the deployment\'s own hardware, ' +
+      'which is the case where the community data never left it.',
+  })
+  answerProvider?: ImplementedAiProvider;
+
+  @ApiPropertyOptional({
+    example: 'openai/gpt-oss-20b',
+    description:
+      'The specific model that wrote the answer. Absent unless answerSource is ' +
+      '"llm". Recorded so a caller can tell which model answered when more than ' +
+      'one provider is configured.',
+  })
+  answerModel?: string;
 
   @ApiProperty({
     example: false,

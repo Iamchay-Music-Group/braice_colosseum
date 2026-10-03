@@ -5,6 +5,7 @@ import {
   AiProvider,
   AiUnavailableError,
   ChatMessage,
+  ImplementedAiProvider,
 } from './types';
 
 /**
@@ -31,15 +32,30 @@ export class AiClient {
    * Callers use this to decide whether to fall back rather than to fail, so
    * an absent API key degrades the quality of an answer instead of taking the
    * feature offline.
+   *
+   * Ollama is the one provider that does not need a key: it is a daemon on our
+   * own host that authenticates nothing. Requiring one here would report every
+   * local deployment as disabled, so readiness is asked of the provider rather
+   * than assumed from one shared rule.
    */
   isEnabled(): boolean {
-    return Boolean(this.config.apiKey && this.config.model);
+    if (!this.config.model) return false;
+    if (this.requiresCredential()) return Boolean(this.config.apiKey);
+
+    return true;
+  }
+
+  /** Whether this provider authenticates requests at all. */
+  private requiresCredential(): boolean {
+    return this.config.provider !== 'ollama';
   }
 
   /** Human-readable reason the model is unavailable, for logs and health. */
   disabledReason(): string {
-    if (!this.config.apiKey) return 'AI_API_KEY is not set';
-    if (!this.config.model) return 'AI_MODEL is not set';
+    if (!this.config.model) return 'model is not set';
+    if (this.requiresCredential() && !this.config.apiKey) {
+      return 'API key is not set';
+    }
     return 'AI integration is not configured';
   }
 
@@ -64,7 +80,19 @@ export class AiClient {
 
     const text = completion.choices[0]?.message?.content ?? '';
 
-    return { text, source: 'llm', model: this.config.model };
+    return {
+      text,
+      source: 'llm',
+      model: this.config.model,
+      // The provider that actually ran. Guarded rather than cast because
+      // `complete()` already refuses an unimplemented provider, so this is the
+      // single point where the narrowing has to be established. Reaching null
+      // here would mean a completion was reported as written by no provider,
+      // which is why the guard exists rather than an assertion.
+      provider: isImplementedProvider(this.config.provider)
+        ? this.config.provider
+        : null,
+    };
   }
 
   /**
@@ -101,22 +129,97 @@ export class AiClient {
   }
 
   private createClient(): OpenAI {
-    if (this.config.provider === 'openai') {
-      return new OpenAI({ apiKey: this.config.apiKey });
-    }
+    switch (this.config.provider) {
+      case 'openai':
+        return new OpenAI({
+          apiKey: this.config.apiKey,
+          ...(this.config.baseUrl ? { baseURL: this.config.baseUrl } : {}),
+        });
 
-    // Anthropic is a recognised provider name but has no transport here. It
-    // fails loudly rather than silently falling through to a default, so a
-    // half-configured deployment is visible in the logs.
-    throw new AiUnavailableError(
-      `AI provider "${this.config.provider}" is recognised but not implemented`,
-    );
+      case 'nvidia':
+        // NVIDIA Build hosts open-weight models behind an OpenAI-compatible
+        // Chat Completions surface, so the only real difference is the host.
+        // The default here is NVIDIA's; overriding it is what lets the same
+        // code drive a self-hosted NIM endpoint on our own GPUs.
+        return new OpenAI({
+          apiKey: this.config.apiKey,
+          baseURL: this.config.baseUrl ?? NVIDIA_BUILD_BASE_URL,
+        });
+
+      case 'ollama':
+        // Ollama is the same open-weight model served by a daemon on our own
+        // hardware instead of on NVIDIA's. That is the whole difference, and it
+        // is why this is a base URL rather than a new transport.
+        //
+        // The placeholder key is not a credential and does not authenticate
+        // anything: a local Ollama ignores whatever it is sent. The OpenAI SDK
+        // nevertheless refuses to construct without a non-empty apiKey, so the
+        // value below exists purely to satisfy that check. Recording this as an
+        // empty string instead would look like an unset key in a stack trace
+        // and send an operator hunting for a secret that does not exist.
+        return new OpenAI({
+          apiKey: this.config.apiKey || OLLAMA_PLACEHOLDER_API_KEY,
+          baseURL: this.config.baseUrl ?? OLLAMA_BASE_URL,
+        });
+
+      // Anthropic is a recognised provider name but has no transport here. It
+      // fails loudly rather than silently falling through to a default, so a
+      // half-configured deployment is visible in the logs.
+      default:
+        throw new AiUnavailableError(
+          `AI provider "${this.config.provider}" is recognised but not implemented`,
+        );
+    }
   }
 }
 
-/** Providers this build can actually construct a client for. */
-export const IMPLEMENTED_PROVIDERS: readonly AiProvider[] = ['openai'];
+/**
+ * Hosted NVIDIA Build endpoint.
+ *
+ * Serves the open-weight catalog (gpt-oss, Nemotron, Llama, Mistral) over the
+ * OpenAI Chat Completions API under the same bearer-token scheme, so the
+ * existing SDK is reused rather than a second HTTP client.
+ */
+export const NVIDIA_BUILD_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 
-export function isImplementedProvider(provider: AiProvider): boolean {
-  return IMPLEMENTED_PROVIDERS.includes(provider);
+/**
+ * Local Ollama daemon.
+ *
+ * Ollama serves the *same* open-weight models as the hosted catalog, but on
+ * hardware we control. Loopback is the default because that is where `ollama
+ * serve` listens, and because a local model is the strongest privacy posture
+ * available: authorized community data does not leave the host at all.
+ *
+ * Overridable for a daemon on another machine in the same LAN. It is still
+ * deployment configuration rather than a request parameter — see the note on
+ * {@link AiClientConfig.baseUrl}.
+ */
+export const OLLAMA_BASE_URL = 'http://localhost:11434/v1';
+
+/**
+ * Non-empty stand-in handed to the OpenAI SDK when talking to Ollama.
+ *
+ * Ollama ignores authentication locally, but the SDK throws on an empty apiKey
+ * before a request is ever sent. This value exists to get past that check and
+ * carries no authority whatsoever.
+ */
+export const OLLAMA_PLACEHOLDER_API_KEY = 'ollama';
+
+/**
+ * Providers this build can actually construct a client for.
+ *
+ * The config layer validates against this list rather than keeping its own, so
+ * a provider cannot be accepted by configuration and then fail at the first
+ * request.
+ */
+export const IMPLEMENTED_PROVIDERS: readonly ImplementedAiProvider[] = [
+  'openai',
+  'nvidia',
+  'ollama',
+];
+
+export function isImplementedProvider(
+  provider: AiProvider,
+): provider is ImplementedAiProvider {
+  return (IMPLEMENTED_PROVIDERS as readonly AiProvider[]).includes(provider);
 }

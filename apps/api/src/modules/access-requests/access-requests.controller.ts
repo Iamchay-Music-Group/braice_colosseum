@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -21,6 +22,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AccessRequestsService } from './access-requests.service';
+import { CreateAccessRequestDto } from './dto/create-access-request.dto';
 import { AccessRequest } from './entities/access-request.entity';
 import {
   CurrentPrincipal,
@@ -56,26 +58,38 @@ export class AccessRequestsController {
     description:
       'A proposal only; confers no access until governance approves it and ' +
       'a permission is issued. The requester is the authenticated caller and ' +
-      'cannot be set in the body.',
+      'cannot be set in the body. The caller must be an ACTIVE member of the ' +
+      'community being asked of.',
   })
   @ApiOkResponse({ description: 'Request created (status PENDING)' })
+  @ApiBadRequestResponse({ description: 'Body failed validation' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   @ApiForbiddenResponse({
     description: 'Caller is not a member of the community',
   })
-  create(
-    @Body()
-    body: {
-      communityId: string;
-      datasetId: string;
-      purpose: string;
-      operation: string;
-      requestedDurationSeconds: number;
-    },
+  async create(
+    @Body() dto: CreateAccessRequestDto,
     @CurrentPrincipal() principal: JwtPayload,
   ): Promise<AccessRequest> {
+    // Membership, not just authentication. A request writes an ACCESS_REQUESTED
+    // row into that community's audit trail and puts a pending proposal in front
+    // of its operator, so letting an outsider file one is a way to write into a
+    // community's record — and to make its operator spend time on a stranger's
+    // ask. The check reads live membership rather than the token, so a removal
+    // takes effect immediately instead of lasting until the token expires.
+    const isMember = await this.membershipsService.isActiveMember(
+      principal.sub,
+      dto.communityId,
+    );
+
+    if (!isMember) {
+      throw new ForbiddenException(
+        'Join the community before requesting access to its data.',
+      );
+    }
+
     return this.accessRequestsService.create({
-      ...body,
+      ...dto,
       requesterId: principal.sub,
     });
   }

@@ -6,6 +6,7 @@ import { CommunitiesService } from './communities.service';
 import { Community } from './entities/community.entity';
 import { Membership } from '../memberships/entities/membership.entity';
 import { CreateCommunityDto } from './dto/create-community.dto';
+import { ApprovalMode } from '../governance/entities/governance-decision.entity';
 
 type MockRepo<T extends ObjectLiteral = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -63,7 +64,7 @@ describe('CommunitiesService', () => {
     it('should create a community', async () => {
       const dto: CreateCommunityDto = {
         name: 'Afrobeat Creators',
-        governanceConfig: { approvalMode: 'CREATOR_AND_THRESHOLD', thresholdPercentage: 60 },
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_AND_THRESHOLD, thresholdPercentage: 60 },
       };
       const saved = { id: 'comm-1', name: 'Afrobeat Creators', description: null, operatorId: 'operator-uuid', governanceConfig: dto.governanceConfig };
 
@@ -86,7 +87,7 @@ describe('CommunitiesService', () => {
       // member count read 0.
       const dto: CreateCommunityDto = {
         name: 'Afrobeat Creators',
-        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_ONLY, thresholdPercentage: 0 },
       };
 
       tx.managerSpies.create.mockImplementation((_e: unknown, data: unknown) => ({ ...(data as object), id: 'comm-9' }));
@@ -107,7 +108,7 @@ describe('CommunitiesService', () => {
       // state, so it must never be observable even momentarily.
       const dto: CreateCommunityDto = {
         name: 'Afrobeat Creators',
-        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_ONLY, thresholdPercentage: 0 },
       };
 
       await service.create(dto, 'operator-uuid');
@@ -118,7 +119,7 @@ describe('CommunitiesService', () => {
     it('does not persist a community when enrolling the operator fails', async () => {
       const dto: CreateCommunityDto = {
         name: 'Afrobeat Creators',
-        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_ONLY, thresholdPercentage: 0 },
       };
 
       tx.managerSpies.save
@@ -132,7 +133,7 @@ describe('CommunitiesService', () => {
       const dto: CreateCommunityDto = {
         name: 'Test',
         description: 'A test community',
-        governanceConfig: { approvalMode: 'CREATOR_ONLY', thresholdPercentage: 0 },
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_ONLY, thresholdPercentage: 0 },
       };
 
       await service.create(dto, 'op-1');

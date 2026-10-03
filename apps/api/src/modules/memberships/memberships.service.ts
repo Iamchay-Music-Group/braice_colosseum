@@ -2,12 +2,19 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Membership } from './entities/membership.entity';
+import {
+  MODERATING_ROLES,
+  MembershipRole,
+} from './entities/membership-role.enum';
 import { Community } from '../communities/entities/community.entity';
+import { AuditService } from '../audit/audit.service';
+import { AuditEventType } from '../audit/entities/audit-event.entity';
 
 /**
  * Memberships, and the community-ownership checks that gate them.
@@ -25,6 +32,7 @@ export class MembershipsService {
     private readonly membershipRepo: Repository<Membership>,
     @InjectRepository(Community)
     private readonly communityRepo: Repository<Community>,
+    private readonly auditService: AuditService,
   ) {}
 
   async join(communityId: string, userId: string): Promise<Membership> {
@@ -38,7 +46,7 @@ export class MembershipsService {
     const membership = this.membershipRepo.create({
       communityId,
       userId,
-      role: 'MEMBER',
+      role: MembershipRole.MEMBER,
       status: 'ACTIVE',
     });
 
@@ -46,14 +54,136 @@ export class MembershipsService {
   }
 
   /**
+   * Assign a role to an existing member. Operator only.
+   *
+   * OPERATOR is a transfer, not a promotion. The seat lives in one place —
+   * `communities.operator_id` — and every authority check in the system reads
+   * that column. Granting OPERATOR without taking it would leave two people
+   * able to approve and issue while only one of them could pass an operator
+   * check, so the roster would promise authority the service would not honour.
+   * Moving it in one transaction also guarantees the failure mode does not
+   * exist: there is no interleaving in which the community has two operators, or
+   * none, and therefore none in which it becomes impossible to approve anything
+   * again.
+   *
+   * The caller is demoted to MEMBER as part of the transfer rather than being
+   * left as a second OPERATOR row. Demotion of the current operator is refused:
+   * it is the transfer that is safe, because it names a successor.
+   */
+  async assignRole(
+    communityId: string,
+    targetUserId: string,
+    role: MembershipRole,
+    principalId: string,
+  ): Promise<Membership> {
+    const community = await this.assertCommunityOperator(communityId, principalId);
+
+    const target = await this.membershipRepo.findOne({
+      where: { communityId, userId: targetUserId },
+    });
+    if (!target) {
+      throw new NotFoundException('Membership not found');
+    }
+
+    if (role === target.role) {
+      // Idempotent for the non-seat roles, where repeating the call changes
+      // nothing. The operator seat is exempt: re-assigning it to its current
+      // holder looks like a transfer and is not one, and answering it as a
+      // success would hide a client that meant to hand it to someone else.
+      if (role !== MembershipRole.OPERATOR) {
+        return target;
+      }
+      throw new BadRequestException(
+        'You are already the operator of this community',
+      );
+    }
+
+    if (target.status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'Only an active member can hold a role in this community',
+      );
+    }
+
+    if (role === MembershipRole.MEMBER && community.operatorId === targetUserId) {
+      throw new BadRequestException(
+        'The operator cannot be demoted. Assign OPERATOR to another member to ' +
+          'transfer ownership first.',
+      );
+    }
+
+    // One transaction for the roster row and the seat: half-applied would be
+    // worse than either outcome, since the two disagreeing is what every
+    // authority check reads.
+    await this.membershipRepo.manager.transaction(async (manager: EntityManager) => {
+      await manager.update(
+        Membership,
+        { id: target.id },
+        { role },
+      );
+
+      if (role === MembershipRole.OPERATOR) {
+        await manager.update(
+          Membership,
+          { communityId, userId: principalId },
+          { role: MembershipRole.MEMBER },
+        );
+        await manager.update(Community, { id: communityId }, { operatorId: targetUserId });
+      }
+    });
+
+    // Recorded after the transaction commits, so the trail never claims a role
+    // change the database refused. Fail-soft for the same reason the governance
+    // promotion is: the authority has already moved, and surfacing an error here
+    // would tell the operator the transfer failed when it did not.
+    await this.auditService.record({
+      communityId,
+      actorId: principalId,
+      eventType: AuditEventType.ROLE_ASSIGNED,
+      resourceId: target.id,
+      metadata: {
+        scope: 'membership',
+        userId: targetUserId,
+        from: target.role,
+        to: role,
+        ...(role === MembershipRole.OPERATOR
+          ? { transferredFrom: principalId }
+          : {}),
+      },
+    });
+
+    return { ...target, role };
+  }
+
+  /**
+   * Whether a caller may remove an ordinary member: the operator, or a
+   * moderator.
+   *
+   * Distinct from {@link assertCommunityOperator}, which is the gate on actions
+   * that create authority. A moderator can evict someone and cannot approve a
+   * request, issue a permission, or hand out the operator seat — which is what
+   * makes the tier safe to delegate.
+   */
+  async canModerate(
+    communityId: string,
+    principalId: string,
+  ): Promise<boolean> {
+    if (await this.isCommunityOperator(communityId, principalId)) {
+      return true;
+    }
+
+    const membership = await this.findActiveMembership(principalId, communityId);
+
+    return membership !== null && MODERATING_ROLES.includes(membership.role);
+  }
+
+  /**
    * Leave a community.
    *
-   * An operator cannot leave their own community. There is no route to transfer
-   * ownership, so allowing it would leave a community with nobody able to
-   * approve an access request, mint a permission, or anchor a decision on-chain
-   * — permanently, and with no route back. Refusing is the only safe answer
-   * until ownership transfer exists; this should become a 409-with-a-transfer-
-   * flow rather than a permanent ban the day it does.
+   * An operator cannot leave their own community, because leaving is not the
+   * same as handing over: nothing names a successor, so the community would be
+   * left with nobody able to approve an access request, mint a permission, or
+   * anchor a decision on-chain — permanently, and with no route back. Now that
+   * `assignRole` exists, the answer names the way out instead of only refusing.
    *
    * Membership removal by an operator is a different route (removeMember) and is
    * unaffected: an operator may remove an ordinary member, just not themselves.
@@ -69,7 +199,8 @@ export class MembershipsService {
 
     if (community.operatorId === userId) {
       throw new ForbiddenException(
-        'An operator cannot leave their own community',
+        'An operator cannot leave their own community. Assign the OPERATOR ' +
+          'role to another member first to transfer ownership.',
       );
     }
 

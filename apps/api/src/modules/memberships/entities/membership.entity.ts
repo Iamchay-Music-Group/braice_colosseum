@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Community } from '../../communities/entities/community.entity';
+import { MembershipRole } from './membership-role.enum';
 
 @Entity('memberships')
 @Unique(['communityId', 'userId'])
@@ -23,7 +24,7 @@ export class Membership {
   userId!: string;
 
   @Column({ type: 'text' })
-  role!: string;
+  role!: MembershipRole;
 
   @Column({ type: 'text' })
   status!: string;

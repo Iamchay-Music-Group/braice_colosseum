@@ -7,6 +7,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { Community } from './entities/community.entity';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { Membership } from '../memberships/entities/membership.entity';
+import { MembershipRole } from '../memberships/entities/membership-role.enum';
 
 @Injectable()
 export class CommunitiesService {
@@ -53,7 +54,7 @@ export class CommunitiesService {
         manager.create(Membership, {
           communityId: saved.id,
           userId: operatorId,
-          role: 'OPERATOR',
+          role: MembershipRole.OPERATOR,
           status: 'ACTIVE',
         }),
       );

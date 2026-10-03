@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { AggregationLevel, DenialReason, Operation } from '@braice/permission-engine';
+import { AggregationLevel, DenialReason } from '@braice/permission-engine';
 import { AiService } from './ai.service';
 import { AiGateway } from './ai.gateway';
 import { AuditService } from '../audit/audit.service';
@@ -36,8 +36,9 @@ describe('AiService', () => {
   let audit: { record: jest.Mock };
 
   /**
-   * No AI_API_KEY. The model is therefore unreachable and the service must
-   * answer deterministically — which is the deployment this repo actually has.
+   * No AI_API_KEY and no NVIDIA_API_KEY unless a test supplies one. The model is
+   * therefore unreachable and the service must answer deterministically — which
+   * is the deployment this repo actually has.
    */
   function build(env: Record<string, string> = {}) {
     gateway = {
@@ -104,6 +105,74 @@ describe('AiService', () => {
 
       expect(result.answerSource).toBe('deterministic');
       expect(result.denied).toBe(true);
+    });
+  });
+
+  describe('provider chain', () => {
+    it('reports no active provider when no key is configured', () => {
+      expect(service.activeProvider()).toBeNull();
+      expect(service.activeModel()).toBeNull();
+    });
+
+    it('activates openai when only the openai key is set', async () => {
+      const moduleRef = await build({ AI_API_KEY: 'sk-test' });
+      const configured = moduleRef.get(AiService);
+
+      expect(configured.activeProvider()).toBe('openai');
+      expect(configured.activeModel()).toBe('gpt-4');
+    });
+
+    it('falls through to nvidia when the openai key is absent', async () => {
+      // The whole point of the chain. Note no live call is attempted: these
+      // tests never reach the network, they assert which provider was selected
+      // at boot.
+      const moduleRef = await build({
+        AI_PROVIDERS: 'openai,nvidia',
+        NVIDIA_API_KEY: 'nvapi-test',
+      });
+      const configured = moduleRef.get(AiService);
+
+      expect(configured.activeProvider()).toBe('nvidia');
+      expect(configured.activeModel()).toBe('openai/gpt-oss-20b');
+    });
+
+    it('prefers openai when both keys are set', async () => {
+      const moduleRef = await build({
+        AI_PROVIDERS: 'openai,nvidia',
+        AI_API_KEY: 'sk-test',
+        NVIDIA_API_KEY: 'nvapi-test',
+      });
+      const configured = moduleRef.get(AiService);
+
+      expect(configured.activeProvider()).toBe('openai');
+    });
+
+    it('activates nothing when a provider has no transport', async () => {
+      const moduleRef = await build({
+        AI_PROVIDERS: 'anthropic',
+        ANTHROPIC_API_KEY: 'sk-ant-test',
+      });
+      const configured = moduleRef.get(AiService);
+
+      expect(configured.isEnabled()).toBe(false);
+      expect(configured.activeProvider()).toBeNull();
+    });
+
+    it('still answers deterministically when only the fallback is configured', async () => {
+      // Selection must not weaken the honesty contract: an nvidia key means a
+      // model *may* be called, and since the call fails here the answer is still
+      // computed locally and still labelled as such.
+      const moduleRef = await build({
+        AI_PROVIDERS: 'openai,nvidia',
+        NVIDIA_API_KEY: 'nvapi-test',
+      });
+      const configured = moduleRef.get(AiService);
+      gateway.communityInsight.execute.mockResolvedValue(INSIGHT);
+
+      const result = await configured.query(PRINCIPAL, QUERY);
+
+      expect(result.answerSource).toBe('deterministic');
+      expect(result.answer).toContain('streetwear');
     });
   });
 
@@ -316,6 +385,28 @@ describe('AiService', () => {
       );
     });
 
+    it('records no provider or model for a deterministic answer', async () => {
+      // The configured provider exists on a deployment that has one, and it is
+      // still logged as null here: the audit trail describes the answer that was
+      // produced, not the one that could have been.
+      const moduleRef = await build({ AI_API_KEY: 'sk-test' });
+      const configured = moduleRef.get(AiService);
+      gateway.communityInsight.execute.mockResolvedValue(INSIGHT);
+
+      await configured.query(PRINCIPAL, QUERY);
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: AuditEventType.AI_ANALYSIS_COMPLETED,
+          metadata: expect.objectContaining({
+            answerSource: 'deterministic',
+            answerProvider: null,
+            answerModel: null,
+          }),
+        }),
+      );
+    });
+
     it('records the community on every event', async () => {
       gateway.communityInsight.execute.mockResolvedValue(INSIGHT);
 
@@ -350,6 +441,29 @@ describe('AiService', () => {
       const result = await service.query(PRINCIPAL, QUERY);
 
       expect(result.permissionId).toBeUndefined();
+    });
+
+    it('omits the model fields entirely on a deterministic answer', async () => {
+      // Absent rather than null, and certainly rather than naming the model
+      // that would have been called. A caller rendering this must not be able
+      // to read a model name out of a locally-computed answer.
+      const result = await service.query(PRINCIPAL, QUERY);
+
+      expect(result.answerProvider).toBeUndefined();
+      expect(result.answerModel).toBeUndefined();
+    });
+
+    it('omits the model fields on a denied response', async () => {
+      gateway.communityInsight.execute.mockResolvedValue({
+        denied: true,
+        reason: DenialReason.NO_PERMISSION,
+        requestedAggregationLevel: AggregationLevel.COMMUNITY,
+      });
+
+      const result = await service.query(PRINCIPAL, QUERY);
+
+      expect(result.answerProvider).toBeUndefined();
+      expect(result.answerModel).toBeUndefined();
     });
   });
 });

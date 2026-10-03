@@ -36,12 +36,13 @@ describe('MembershipsController (e2e)', () => {
     findByCommunity: jest.Mock;
     assertCommunityExists: jest.Mock;
     assertCommunityOperator: jest.Mock;
+    isCommunityOperator: jest.Mock;
     isActiveMember: jest.Mock;
     canViewRoster: jest.Mock;
+    canModerate: jest.Mock;
+    findActiveMembership: jest.Mock;
+    assignRole: jest.Mock;
   };
-
-  /** Authenticated as a given user. */
-  const as = (sub: string) => ({ canActivate: () => true, sub });
 
   const buildApp = async (principalId: string | null) => {
     membershipsService = {
@@ -50,8 +51,19 @@ describe('MembershipsController (e2e)', () => {
       findByCommunity: jest.fn().mockResolvedValue([membership]),
       assertCommunityExists: jest.fn().mockResolvedValue(community),
       assertCommunityOperator: jest.fn().mockResolvedValue(community),
+      isCommunityOperator: jest.fn().mockResolvedValue(false),
       isActiveMember: jest.fn().mockResolvedValue(true),
       canViewRoster: jest.fn().mockResolvedValue(true),
+      canModerate: jest.fn().mockResolvedValue(false),
+      findActiveMembership: jest
+        .fn()
+        .mockResolvedValue({ id: 'mem-2', userId: OTHER, role: 'MEMBER' }),
+      assignRole: jest.fn().mockResolvedValue({
+        id: 'mem-2',
+        communityId: COMMUNITY,
+        userId: OTHER,
+        role: 'MODERATOR',
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -193,6 +205,8 @@ describe('MembershipsController (e2e)', () => {
     });
 
     it('lets the operator remove a member', () => {
+      membershipsService.isCommunityOperator.mockResolvedValue(true);
+
       return request(app.getHttpServer())
         .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
         .expect(200)
@@ -205,14 +219,155 @@ describe('MembershipsController (e2e)', () => {
     });
 
     it('surfaces the operator check failure', async () => {
-      const { ForbiddenException } = await import('@nestjs/common');
-      membershipsService.assertCommunityOperator.mockRejectedValue(
-        new ForbiddenException('not the operator'),
-      );
+      membershipsService.canModerate.mockResolvedValue(false);
+      membershipsService.isCommunityOperator.mockResolvedValue(false);
 
       return request(app.getHttpServer())
         .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
         .expect(403);
+    });
+
+    // Removing the operator would leave the community with nobody able to
+    // approve, issue, or remove the next member.
+    it('never removes the operator', async () => {
+      membershipsService.assertCommunityExists.mockResolvedValue({
+        ...community,
+        operatorId: OTHER,
+      });
+
+      await request(app.getHttpServer())
+        .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+        .expect(403);
+
+      expect(membershipsService.leave).not.toHaveBeenCalled();
+    });
+
+    describe('moderator boundaries', () => {
+      beforeEach(async () => {
+        await buildApp(OPERATOR);
+        membershipsService.isCommunityOperator.mockResolvedValue(false);
+        membershipsService.canModerate.mockResolvedValue(true);
+      });
+
+      it('lets a moderator remove an ordinary member', () => {
+        return request(app.getHttpServer())
+          .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+          .expect(200)
+          .then(() => {
+            expect(membershipsService.leave).toHaveBeenCalledWith(
+              COMMUNITY,
+              OTHER,
+            );
+          });
+      });
+
+      it('refuses a moderator removing another moderator', async () => {
+        membershipsService.findActiveMembership.mockResolvedValue({
+          id: 'mem-3',
+          userId: OTHER,
+          role: 'MODERATOR',
+        });
+
+        await request(app.getHttpServer())
+          .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+          .expect(403);
+
+        expect(membershipsService.leave).not.toHaveBeenCalled();
+      });
+
+      it('refuses a moderator using this route on themselves', async () => {
+        membershipsService.canModerate.mockResolvedValue(true);
+
+        await request(app.getHttpServer())
+          .delete(`/api/communities/${COMMUNITY}/members/${OPERATOR}`)
+          .expect(403);
+
+        expect(membershipsService.leave).not.toHaveBeenCalled();
+      });
+
+      it('refuses an ordinary member entirely', async () => {
+        membershipsService.canModerate.mockResolvedValue(false);
+
+        await request(app.getHttpServer())
+          .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+          .expect(403);
+
+        expect(membershipsService.leave).not.toHaveBeenCalled();
+      });
+
+      it('lets the operator remove a moderator', async () => {
+        membershipsService.isCommunityOperator.mockResolvedValue(true);
+        membershipsService.findActiveMembership.mockResolvedValue({
+          id: 'mem-3',
+          userId: OTHER,
+          role: 'MODERATOR',
+        });
+
+        await request(app.getHttpServer())
+          .delete(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+          .expect(200);
+      });
+    });
+  });
+
+  describe('PATCH /api/communities/:communityId/members/:userId', () => {
+    beforeEach(async () => {
+      await buildApp(OPERATOR);
+    });
+
+    it('assigns the role from the body using the caller from the token', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+        .send({ role: 'MODERATOR' })
+        .expect(200)
+        .expect((res: any) => {
+          expect(res.body.role).toBe('MODERATOR');
+        });
+
+      expect(membershipsService.assignRole).toHaveBeenCalledWith(
+        COMMUNITY,
+        OTHER,
+        'MODERATOR',
+        OPERATOR,
+      );
+    });
+
+    it('rejects a role outside the enum', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+        .send({ role: 'SUPREME' })
+        .expect(400);
+
+      expect(membershipsService.assignRole).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing role', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+        .send({})
+        .expect(400);
+
+      expect(membershipsService.assignRole).not.toHaveBeenCalled();
+    });
+
+    // A body that also names the caller must not be able to reassign them.
+    it('ignores a userId supplied in the body', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+        .send({ role: 'MEMBER', userId: 'someone-else' })
+        .expect(400);
+
+      expect(membershipsService.assignRole).not.toHaveBeenCalled();
+    });
+
+    it('requires authentication', () => {
+      return buildApp(null)
+        .then(() =>
+          request(app.getHttpServer())
+            .patch(`/api/communities/${COMMUNITY}/members/${OTHER}`)
+            .send({ role: 'MODERATOR' })
+            .expect(403),
+        );
     });
   });
 
@@ -247,7 +402,6 @@ describe('MembershipsController (e2e)', () => {
     });
 
     it('refuses a non-member', async () => {
-      const { ForbiddenException } = await import('@nestjs/common');
       membershipsService.canViewRoster.mockResolvedValue(false);
 
       return request(app.getHttpServer())

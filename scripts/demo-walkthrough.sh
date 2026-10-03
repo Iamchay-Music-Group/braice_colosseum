@@ -172,20 +172,29 @@ ok "agent linked wallet $AGENT_WALLET (on-chain anchoring enabled)"
 
 # --- 2 --------------------------------------------------------------------
 step "2. Create the community"
-COMMUNITY="$(api POST /communities "{\"name\":\"Afrobeat Creators\",\"description\":\"100 creators shaping the next wave\",\"operatorId\":\"$CREATOR_ID\",\"governanceConfig\":{\"approvalMode\":\"CREATOR_AND_THRESHOLD\",\"thresholdPercentage\":60}}")"
+# No operatorId, and the creator's own token: the operator is taken from the
+# verified JWT, and the body is validated with forbidNonWhitelisted, so naming
+# one here is a 400 rather than a silently-ignored field.
+COMMUNITY="$(api POST /communities "{\"name\":\"Afrobeat Creators\",\"description\":\"100 creators shaping the next wave\",\"governanceConfig\":{\"approvalMode\":\"CREATOR_AND_THRESHOLD\",\"thresholdPercentage\":60}}" "$CREATOR_TOKEN")"
 COMMUNITY_ID="$(jget "$COMMUNITY" id)"
 ok "community $COMMUNITY_ID (60% threshold, creator + threshold)"
 
 # --- 3 --------------------------------------------------------------------
 step "3. Enroll 100 members"
+# Joining is self-service and the route takes no userId — it enrols the caller —
+# so each member calls it with their own token.
+#
+# The creator is not in this loop and does not need a join of their own:
+# creating the community already wrote an ACTIVE OPERATOR membership for them,
+# which is what makes their own vote count toward the threshold in step 7. A
+# second join would be a duplicate, and the route answers that with a 409.
 MEMBER_IDS=()
 for i in $(seq 1 100); do
-  read -r _t MID _e <<< "$(register "Member $i" "member$i")"
-  api POST "/communities/$COMMUNITY_ID/members" "{\"userId\":\"$MID\"}" >/dev/null
+  read -r MEMBER_TOKEN MID _e <<< "$(register "Member $i" "member$i")"
+  api POST "/communities/$COMMUNITY_ID/members" '' "$MEMBER_TOKEN" >/dev/null
   MEMBER_IDS+=("$MID")
 done
-api POST "/communities/$COMMUNITY_ID/members" "{\"userId\":\"$CREATOR_ID\"}" >/dev/null
-ok "100 members enrolled, creator enrolled as operator"
+ok "100 members enrolled; creator is the operator and an active member"
 
 # --- 4 --------------------------------------------------------------------
 step "4. Ingest 1000 individual activity records"
@@ -205,13 +214,16 @@ for i in $(seq 0 999); do
   done
   OCCURRED_AT="$(date -u -d "@$(( (NOW_MS - RANDOM % WINDOW_MS) / 1000 ))" +%Y-%m-%dT%H:%M:%SZ)"
   api POST "/communities/$COMMUNITY_ID/activity" \
-    "{\"memberId\":\"$MEMBER_ID\",\"activityType\":\"browse\",\"interestCategory\":\"$CATEGORY\",\"occurredAt\":\"$OCCURRED_AT\",\"metadata\":{\"source\":\"demo\"}}" >/dev/null
+    "{\"memberId\":\"$MEMBER_ID\",\"activityType\":\"browse\",\"interestCategory\":\"$CATEGORY\",\"occurredAt\":\"$OCCURRED_AT\",\"metadata\":{\"source\":\"demo\"}}" "$CREATOR_TOKEN" >/dev/null
 done
 ok "1000 individual records ingested"
 
 # --- 5 --------------------------------------------------------------------
 step "5. Aggregate into community intelligence"
-DATASET="$(api POST "/communities/$COMMUNITY_ID/datasets/generate" '{"datasetType":"interests"}')"
+# Aggregation reads every individual record, so it is reserved to the operator:
+# whoever causes the aggregate to be built decides what the community's
+# published intelligence says.
+DATASET="$(api POST "/communities/$COMMUNITY_ID/datasets/generate" '{"datasetType":"interests"}' "$CREATOR_TOKEN")"
 DATASET_ID="$(jget "$DATASET" id)"
 ok "dataset $DATASET_ID (aggregated from $(jget "$DATASET" sourceCount) records)"
 info "percentages only: $(jget "$DATASET" data)"
@@ -219,16 +231,25 @@ ok "no member identifiers present in the dataset"
 
 # --- 6 --------------------------------------------------------------------
 step "6. Brand requests access (campaign_planning / ANALYZE)"
-REQUEST="$(api POST /access-requests "{\"communityId\":\"$COMMUNITY_ID\",\"requesterId\":\"$BRAND_ID\",\"datasetId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\",\"requestedDurationSeconds\":2592000}")"
+# The brand joins first: requesting access to a community's data is something
+# its members do, and the check reads live membership rather than the token, so
+# a removal takes effect immediately instead of lasting until the token expires.
+api POST "/communities/$COMMUNITY_ID/members" '' "$BRAND_TOKEN" >/dev/null
+ok "brand joined the community"
+# No requesterId: the requester is whoever holds this token, and the body is
+# validated with forbidNonWhitelisted, so sending the field at all is now a 400
+# rather than something quietly dropped. The brand's token is what files it.
+REQUEST="$(api POST /access-requests "{\"communityId\":\"$COMMUNITY_ID\",\"datasetId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\",\"requestedDurationSeconds\":2592000}" "$BRAND_TOKEN")"
 REQUEST_ID="$(jget "$REQUEST" id)"
 ok "request $REQUEST_ID status=$(jget "$REQUEST" status)"
 info "a request grants nothing on its own"
 
 # --- 7 --------------------------------------------------------------------
 step "7. Governance: creator approves, threshold met"
-# The whole enrolled membership (100 members + creator) approves. With a 60%
-# threshold derived from live ACTIVE membership this is guaranteed to clear
-# ceil(101 * 60 / 100) = 61 approvals regardless of any enrolment drift.
+# Every enrolled member approves. With a 60% threshold derived from live ACTIVE
+# membership this clears comfortably whichever way the count lands: 100 members
+# plus the creator is 101 approvals against a threshold of at most ceil(102 * 60
+# / 100) = 62, and the brand's own join in step 6 is what moves 101 to 102.
 APPROVERS="[\"$CREATOR_ID\""
 for MID in "${MEMBER_IDS[@]}"; do APPROVERS="$APPROVERS,\"$MID\""; done
 APPROVERS="$APPROVERS]"

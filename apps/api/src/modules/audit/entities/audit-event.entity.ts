@@ -23,6 +23,13 @@ export enum AuditEventType {
    */
   AI_ACCESS_DENIED = 'AI_ACCESS_DENIED',
   AI_ANALYSIS_COMPLETED = 'AI_ANALYSIS_COMPLETED',
+  /**
+   * An account role or a community membership role changed. Kept separate from
+   * the governance events that caused it, because the role change outlives the
+   * decision: "who could approve this" and "who is a brand now" are different
+   * questions, and collapsing them makes the trail unable to answer the second.
+   */
+  ROLE_ASSIGNED = 'ROLE_ASSIGNED',
 }
 
 /**

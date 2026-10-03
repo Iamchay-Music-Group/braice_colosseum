@@ -1,4 +1,0 @@
-// Jest e2e config
-// - Module name mapper for path aliases
-// - Test environment: node
-// - Test match pattern: *.e2e.ts

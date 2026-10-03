@@ -10,6 +10,7 @@ import { PermissionsModule } from '../permissions/permissions.module';
 import { AuditModule } from '../audit/audit.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { AuthModule } from '../auth/auth.module';
+import { UsersModule } from '../users/users.module';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @Module({
@@ -19,6 +20,9 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
     AuditModule,
     BlockchainModule,
     AuthModule,
+    // For the BRAND promotion that follows an approval. UsersModule imports
+    // nothing, so this cannot close a cycle.
+    UsersModule,
   ],
   controllers: [GovernanceController],
   providers: [GovernanceService, JwtAuthGuard],

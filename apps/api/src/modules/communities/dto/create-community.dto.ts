@@ -1,16 +1,42 @@
-import { IsString, IsOptional, IsObject, IsNumber } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApprovalMode } from '../../governance/entities/governance-decision.entity';
 
 export class GovernanceConfigDto {
-  @ApiProperty({ example: 'CREATOR_AND_THRESHOLD', description: 'Governance approval mode' })
-  @IsString()
-  approvalMode!: string;
+  @ApiProperty({
+    enum: ApprovalMode,
+    example: ApprovalMode.CREATOR_AND_THRESHOLD,
+    description:
+      'Who has to agree. CREATOR_ONLY is the operator alone, ' +
+      'CREATOR_AND_THRESHOLD is the operator plus a majority of active ' +
+      'members, THRESHOLD_ONLY is active members alone.',
+  })
+  @IsEnum(ApprovalMode, {
+    message: `approvalMode must be one of: ${Object.values(ApprovalMode).join(', ')}`,
+  })
+  approvalMode!: ApprovalMode;
 
-  @ApiProperty({ example: 60, description: 'Community approval threshold percentage' })
-  @IsNumber()
+  @ApiProperty({
+    example: 60,
+    description:
+      'Percentage of ACTIVE members whose approval carries a threshold vote. ' +
+      'Ignored under CREATOR_ONLY. Derived against live membership at decision ' +
+      'time, so it moves as people join and leave.',
+  })
+  @IsInt()
+  @Min(1)
+  @Max(100)
   thresholdPercentage!: number;
-
-  [key: string]: unknown;
 }
 
 export class CreateCommunityDto {
@@ -41,7 +67,28 @@ export class CreateCommunityDto {
   @ApiProperty({
     description: 'Governance configuration',
     example: { approvalMode: 'CREATOR_AND_THRESHOLD', thresholdPercentage: 60 },
+    type: GovernanceConfigDto,
   })
+  /**
+   * `@ValidateNested` plus `@Type` rather than `@IsObject`.
+   *
+   * `@IsObject` alone checks that governanceConfig is an object and stops
+   * there: with nothing transforming it into a `GovernanceConfigDto`, the pipe
+   * has no class to check the nested fields against, so both were stored exactly
+   * as sent. That is how a `thresholdPercentage` of `"60"` or a misspelt
+   * `approvalMode` reached the database — and a misspelt mode is the dangerous
+   * one, because `applyRules` falls through to CREATOR_AND_THRESHOLD for an
+   * unrecognised value. A community that asked for CREATOR_ONLY and typed it
+   * slightly wrong would silently have run the strictest mode instead, and the
+   * community would never see the difference.
+   *
+   * `@IsObject` is kept alongside it because the two answer different
+   * questions: it rejects the property being absent altogether, which
+   * `@ValidateNested` alone does not, while the nested decorators decide
+   * whether what is present is usable.
+   */
   @IsObject()
+  @ValidateNested()
+  @Type(() => GovernanceConfigDto)
   governanceConfig!: GovernanceConfigDto;
 }

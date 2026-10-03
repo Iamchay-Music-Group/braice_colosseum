@@ -170,6 +170,78 @@ describe('CommunitiesController (e2e)', () => {
         .expect(400);
     });
 
+    /**
+     * The nested config used to be checked only for being an object.
+     *
+     * `@IsObject` alone stops at the outer level, so `approvalMode` and
+     * `thresholdPercentage` were stored exactly as sent. The mode is the
+     * dangerous one: `applyRules` falls through to CREATOR_AND_THRESHOLD for any
+     * unrecognised value, so a community that asked for CREATOR_ONLY and typed it
+     * slightly wrong would have run the strictest mode instead and seen no
+     * difference. Each case below sends only the one field that is wrong, so a
+     * rejection cannot be credited to a sibling field.
+     */
+    it('rejects an unrecognised approvalMode', () => {
+      return request(app.getHttpServer())
+        .post('/api/communities')
+        .send({
+          name: 'Typo',
+          governanceConfig: {
+            approvalMode: 'CREATOR_ONLY_TYPO',
+            thresholdPercentage: 60,
+          },
+        })
+        .expect(400)
+        .then(() => {
+          expect(communitiesService.create).not.toHaveBeenCalled();
+        });
+    });
+
+    it('rejects a threshold outside 1..100', () => {
+      return request(app.getHttpServer())
+        .post('/api/communities')
+        .send({
+          name: 'Everyone',
+          governanceConfig: {
+            approvalMode: 'THRESHOLD_ONLY',
+            thresholdPercentage: 0,
+          },
+        })
+        .expect(400)
+        .then(() => {
+          expect(communitiesService.create).not.toHaveBeenCalled();
+        });
+    });
+
+    it('rejects a non-integer threshold', () => {
+      return request(app.getHttpServer())
+        .post('/api/communities')
+        .send({
+          name: 'Sixtyish',
+          governanceConfig: {
+            approvalMode: 'THRESHOLD_ONLY',
+            thresholdPercentage: '60',
+          },
+        })
+        .expect(400)
+        .then(() => {
+          expect(communitiesService.create).not.toHaveBeenCalled();
+        });
+    });
+
+    it('rejects a governanceConfig missing its threshold', () => {
+      return request(app.getHttpServer())
+        .post('/api/communities')
+        .send({
+          name: 'Half-specified',
+          governanceConfig: { approvalMode: 'THRESHOLD_ONLY' },
+        })
+        .expect(400)
+        .then(() => {
+          expect(communitiesService.create).not.toHaveBeenCalled();
+        });
+    });
+
     it('refuses an unauthenticated create', async () => {
       await buildApp(null);
 
@@ -274,7 +346,6 @@ describe('CommunitiesController (e2e)', () => {
     });
 
     it('refuses a stranger', async () => {
-      const { ForbiddenException } = await import('@nestjs/common');
       await buildApp(STRANGER);
       membershipsService.canViewRoster.mockResolvedValue(false);
 

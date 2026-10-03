@@ -8,6 +8,7 @@
     "build": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api build",
     "start": "pnpm --filter @braice/api start:prod",
     "test": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api test",
+    "test:cov": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api test:cov",
     "lint": "pnpm --filter @braice/api lint",
     "seed": "pnpm --filter @braice/api seed:demo",
     "db:migrate": "pnpm --filter @braice/api db:migrate",

@@ -199,7 +199,6 @@ describe('ActivityController (e2e)', () => {
     });
 
     it('refuses a caller who does not operate the community', async () => {
-      const { ForbiddenException } = await import('@nestjs/common');
       communitiesService.findByIdOrNull.mockResolvedValue({
         id: COMMUNITY,
         operatorId: 'someone-else',
@@ -219,7 +218,6 @@ describe('ActivityController (e2e)', () => {
     });
 
     it('does not record when the caller is not the operator', async () => {
-      const { ForbiddenException } = await import('@nestjs/common');
       await buildApp(STRANGER);
       communitiesService.findByIdOrNull.mockResolvedValue({
         id: COMMUNITY,
@@ -240,7 +238,6 @@ describe('ActivityController (e2e)', () => {
     });
 
     it('rejects a memberId with no active membership', async () => {
-      const { NotFoundException } = await import('@nestjs/common');
       membershipsService.findActiveMembership.mockResolvedValue(null);
 
       return request(app.getHttpServer())
@@ -285,7 +282,6 @@ describe('ActivityController (e2e)', () => {
     });
 
     it('refuses a non-member', async () => {
-      const { ForbiddenException } = await import('@nestjs/common');
       await buildApp(STRANGER);
       membershipsService.isActiveMember.mockResolvedValue(false);
 

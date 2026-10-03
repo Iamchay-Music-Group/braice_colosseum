@@ -162,7 +162,7 @@ The community can revoke access at any time. When revoked:
 | Backend API | NestJS + TypeScript | REST API, business logic, authorization |
 | Database | PostgreSQL | Persistent storage for all entities |
 | Blockchain | Solana + Anchor | Verifiable governance/permission state |
-| AI | LLM (OpenAI/Anthropic) | Community intelligence analysis |
+| AI | LLM (OpenAI / NVIDIA Build / Ollama) | Community intelligence analysis |
 | Package Manager | pnpm | Monorepo workspace management |
 | Container | Docker | Local database setup |
 
@@ -306,9 +306,13 @@ AUTH_DOMAIN=BRAICE
 SOLANA_RPC_URL=https://api.devnet.solana.com
 SOLANA_PROGRAM_ID=
 
-AI_PROVIDER=openai
+AI_PROVIDERS=openai,nvidia,ollama
 AI_API_KEY=
 AI_MODEL=gpt-4
+NVIDIA_API_KEY=
+NVIDIA_MODEL=openai/gpt-oss-20b
+OLLAMA_MODEL=
+OLLAMA_BASE_URL=
 
 FRONTEND_URL=http://localhost:3000
 ```
@@ -500,6 +504,54 @@ self-register as a `CREATOR`.
 |--------|----------|-------------|
 | POST | /api/ai/query | Ask AI question |
 
+### AI Provider Chain
+
+The model is optional. With none configured, `/api/ai/query` answers from the
+authorized aggregate and reports `answerSource: "deterministic"` — permission
+enforcement is the product and does not depend on a model being reachable.
+
+`AI_PROVIDERS` is an ordered chain, tried left to right:
+
+| Provider | Credential | Default model | Where it runs |
+|----------|-----------|---------------|---------------|
+| `openai` | `AI_API_KEY` | `gpt-4` | OpenAI |
+| `nvidia` | `NVIDIA_API_KEY` | `openai/gpt-oss-20b` | NVIDIA Build (hosted) |
+| `ollama` | none required | *must be set* | A local daemon |
+
+```bash
+AI_PROVIDERS=openai,nvidia,ollama
+AI_API_KEY=sk-...
+NVIDIA_API_KEY=nvapi-...
+OLLAMA_MODEL=gpt-oss:20b      # required to enable the local tier
+OLLAMA_BASE_URL=http://localhost:11434/v1
+```
+
+Notes:
+
+- **Ollama is a deliberate opt-in.** Naming it in `AI_PROVIDERS` is not enough;
+  `OLLAMA_MODEL` must be set. Without that guard a shared `.env` could put a
+  machine's local daemon on the request path, and could let it outrank a paid
+  provider, just because someone listed it.
+- **The same model, two hosts.** `openai/gpt-oss-20b` on NVIDIA Build and
+  `gpt-oss:20b` on Ollama are the same open-weight checkpoint, so a community can
+  compare the two answers directly instead of comparing two different models.
+- **Failover is automatic and rate-limited.** A provider that fails is skipped
+  for `AI_FAILOVER_COOLDOWN_SECONDS` (default 60) rather than retried on every
+  request, so a failing provider costs one round trip per cooldown window
+  instead of one per request. It is offered a trial again afterwards and resumes
+  automatically if it has recovered.
+- **Failover triggers:** 401, 403, 429, 5xx, and connection/timeout faults. A
+  400 does not — the request itself is malformed, so every provider would reject
+  it identically, and paying three more round trips to learn that is pure
+  latency.
+- **Credentials are per-provider**, which is why a 401 on one is a reason to
+  move on: it says nothing about the health of the next.
+- `GET /api/health` reports `aiProvider`, `aiModel`, and `aiFailover`, so a
+  silent failover is visible rather than inferred from changed answers.
+- Every answer records `answerProvider` and `answerModel` in the audit trail. A
+  deterministic answer records neither, so a model is never named for text it
+  did not write.
+
 ### Audit
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -531,11 +583,12 @@ self-register as a `CREATOR`.
 # Run unit tests
 pnpm test
 
-# Run integration tests
-pnpm test:e2e
-
 # Run all tests with coverage
 pnpm test:cov
+
+# Static checks (both are enforced in CI)
+pnpm lint
+pnpm typecheck
 ```
 
 ### Security Tests

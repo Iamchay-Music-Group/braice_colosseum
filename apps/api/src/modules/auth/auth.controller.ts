@@ -159,10 +159,20 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Return the authenticated principal' })
+  @ApiOperation({
+    summary: 'Return the authenticated principal',
+    description:
+      'Identity as it currently stands. The account claims (email, userType) are ' +
+      'read from the database rather than echoed from the token, so a role ' +
+      'granted after sign-in — governance promoting MEMBER to BRAND, say — is ' +
+      'visible immediately instead of at the next login. Token claims (sub, ' +
+      'amr, jti, exp) are returned as issued. Call this rather than decoding ' +
+      'the token client-side.',
+  })
   @ApiResponse({ status: 200, description: 'Current principal' })
   @ApiResponse({ status: 401, description: 'Missing or invalid token' })
+  @ApiResponse({ status: 404, description: 'Token is valid but the account is gone' })
   me(@CurrentPrincipal() principal: JwtPayload) {
-    return principal;
+    return this.authService.currentPrincipal(principal);
   }
 }

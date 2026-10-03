@@ -47,6 +47,17 @@ export class HealthController {
         // live and answering, it is just not calling a model. Collapsing the
         // two would read as a broken deployment rather than a supported mode.
         ai: this.aiService.isEnabled() ? 'enabled' : 'deterministic',
+        // Which provider answered. The chain means "enabled" no longer implies
+        // a particular vendor, and an operator debugging a surprising answer
+        // needs to know which model is actually in play. Null in deterministic
+        // mode, where no model was called.
+        aiProvider: this.aiService.activeProvider(),
+        aiModel: this.aiService.activeModel(),
+        // Providers skipped after a failed call. Empty while healthy. This is
+        // the only externally visible trace of a failover, and without it a
+        // silent switch looks identical to normal operation — answers keep
+        // arriving, just from somewhere the operator did not choose.
+        aiFailover: this.aiService.failedOverProviders(),
       },
     };
   }

@@ -262,10 +262,20 @@ export class UsersService {
   /**
    * Set an account's role. Not exposed over HTTP.
    *
-   * Roles move through governance or an operator tool, never through a field
-   * a client can post to its own account.
+   * Roles move through governance or an operator tool, never through a field a
+   * client can post to its own account. The parameter is the enum rather than
+   * `string` so a typo becomes a compile error instead of a role nobody
+   * recognises: the old free-text column is exactly what allowed values that
+   * matched no branch.
+   *
+   * Promote-only in practice — callers decide what a role change means — so
+   * nothing here stops a caller from demoting an account. That is the caller's
+   * judgement to make, and it is why this is not a route.
    */
-  async setUserType(userId: string, userType: string): Promise<User> {
+  async setUserType(
+    userId: string,
+    userType: CreateUserType,
+  ): Promise<User> {
     await this.userRepo
       .createQueryBuilder()
       .update(User)

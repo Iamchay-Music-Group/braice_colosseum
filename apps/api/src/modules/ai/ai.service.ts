@@ -1,9 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  AiClient,
+  AiProviderChain,
   AiCompletion,
   AiUnavailableError,
+  type ImplementedAiProvider,
 } from '@braice/ai-client';
 import {
   AggregationLevel,
@@ -15,7 +16,13 @@ import { AuditService } from '../audit/audit.service';
 import { AuditEventType } from '../audit/entities/audit-event.entity';
 import { AiQueryDto } from './dto/ai-query.dto';
 import { AiResponseDto } from './dto/ai-response.dto';
-import { loadAiConfig, AiConfig, isAiConfigured } from '../../config/ai.config';
+import {
+  buildClientConfig,
+  describeInactiveChain,
+  loadAiConfig,
+  validateAiConfig,
+  type AiConfig,
+} from '../../config/ai.config';
 
 type ToolOutcome = CommunityInsight | ToolDenial;
 
@@ -31,7 +38,7 @@ type ToolOutcome = CommunityInsight | ToolDenial;
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly config: AiConfig;
-  private readonly client: AiClient;
+  private readonly chain: AiProviderChain;
 
   constructor(
     @Inject(ConfigService) configService: ConfigService,
@@ -39,18 +46,76 @@ export class AiService {
     private readonly auditService: AuditService,
   ) {
     this.config = loadAiConfig((key) => configService.get<string>(key));
-    this.client = new AiClient({
-      provider: this.config.provider,
-      apiKey: this.config.apiKey,
-      model: this.config.model,
-      temperature: this.config.temperature,
-      maxTokens: this.config.maxTokens,
-    });
+    validateAiConfig(this.config);
+
+    // Every named provider is handed to the chain, not just the active one. The
+    // chain is what does the failing over, so handing it only the active entry
+    // would leave it nothing to fail over to.
+    this.chain = new AiProviderChain(
+      this.config.chain.map((entry) => buildClientConfig(entry, this.config)),
+      { cooldownMs: this.config.failoverCooldownSeconds * 1000 },
+    );
+
+    this.logChainAtBoot();
+  }
+
+  /**
+   * Report what the chain will do, so an operator learns from the log rather
+   * than by noticing that answers changed character mid-demo.
+   */
+  private logChainAtBoot(): void {
+    if (!this.isEnabled()) {
+      this.logger.log(
+        `No model configured: ${describeInactiveChain(this.config)}. ` +
+          'Answering deterministically.',
+      );
+      return;
+    }
+
+    const names = this.config.chain
+      .filter((entry) => entry.provider === this.activeProvider())
+      .map((entry) => `${entry.provider} (${entry.model})`)
+      .join(', ');
+
+    this.logger.log(
+      `AI chain [${this.config.chain
+        .map((entry) => entry.provider)
+        .join(' -> ')}] starting on ${names}.`,
+    );
+  }
+
+  /**
+   * Which provider is answering now, for the audit trail and health endpoint.
+   *
+   * Read live from the chain rather than from the boot-time resolution, because
+   * those are allowed to disagree: after a failure the chain moves on, and an
+   * endpoint still advertising the dead provider would be describing a decision
+   * the service is no longer making.
+   */
+  activeProvider(): ImplementedAiProvider | null {
+    return this.chain.activeProvider();
+  }
+
+  /** The model that will answer, or null when no provider is configured. */
+  activeModel(): string | null {
+    return this.chain.activeModel();
   }
 
   /** Whether a real model is reachable. Surfaced on /api/health. */
   isEnabled(): boolean {
-    return isAiConfigured(this.config) && this.client.isEnabled();
+    return this.chain.isEnabled();
+  }
+
+  /**
+   * Providers currently skipped after a failure, for /api/health.
+   *
+   * Reported because a silent failover is the one kind of degradation an operator
+   * cannot infer from the outside: answers keep arriving and keep looking fine,
+   * they are just coming from a different provider than the deployment is named
+   * after.
+   */
+  failedOverProviders(): ImplementedAiProvider[] {
+    return this.chain.openBreakers();
   }
 
   async query(principalId: string, dto: AiQueryDto): Promise<AiResponseDto> {
@@ -150,6 +215,20 @@ export class AiService {
         // anyone asks of a deterministic answer and the log should answer it
         // without a second query.
         modelAvailable: completion.source === 'llm',
+        // Which provider and model wrote this specific answer. The chain means
+        // "the AI said" is no longer enough to identify the model, so without
+        // these two fields an auditor cannot tell a gpt-4 answer from a
+        // gpt-oss-20b one, or tell at all whether an open-weight model was in
+        // play for this community's data. Null on a deterministic answer,
+        // where no model was involved.
+        answerProvider: completion.provider,
+        answerModel: completion.model,
+        // Any provider in failover cooldown at the moment this answer was
+        // produced. Empty on a healthy chain, and populated precisely when an
+        // answer came from somewhere other than the provider the deployment is
+        // named after — which is the single most important thing to be able to
+        // reconstruct later, and impossible to infer from the answer itself.
+        providersInFailover: this.failedOverProviders(),
         sourceCount: insight.sourceCount,
       },
     });
@@ -160,16 +239,33 @@ export class AiService {
       denied: false,
       resourceId: insight.datasetId,
       aggregationLevel: AggregationLevel.COMMUNITY,
+      // Only present when a model actually wrote the text. A caller reading a
+      // deterministic answer sees no model field at all rather than one naming
+      // a model that never ran.
+      ...(completion.source === 'llm' &&
+      completion.provider !== null &&
+      completion.model !== null
+        ? {
+            answerProvider: completion.provider,
+            answerModel: completion.model,
+          }
+        : {}),
     };
   }
 
   /**
-   * Ask the model, and fall back without pretending.
+   * Ask the chain, and fall back without pretending.
    *
-   * Three ways to end up here without a model: not configured, provider not
-   * implemented, or the API call failed. All three produce a
-   * `deterministic` answer computed from the authorized aggregate, and all
-   * three are reported as `deterministic` so the caller can say which it was.
+   * Four ways to end up here without a model: no provider in the chain has what
+   * it needs, every provider is in failover cooldown, every provider failed, or
+   * the request itself was rejected. All four produce a `deterministic` answer
+   * computed from the authorized aggregate, and all four are reported as
+   * `deterministic` so the caller can say which it was.
+   *
+   * The chain decides how many providers to try and for how long to skip a
+   * failed one; this method does not second-guess it. What matters here is that
+   * a degraded answer is never dressed up as a model answer, and that whoever
+   * receives it can tell a failover happened.
    */
   private async compose(
     question: string,
@@ -177,7 +273,7 @@ export class AiService {
   ): Promise<AiCompletion> {
     if (this.isEnabled()) {
       try {
-        return await this.client.generate(
+        return await this.chain.generate(
           this.systemPrompt(),
           this.renderContext(question, insight),
         );
@@ -194,15 +290,20 @@ export class AiService {
       }
     } else {
       this.logger.log(
-        `No model configured (${this.client.disabledReason()}). ` +
+        `No model configured (${describeInactiveChain(this.config)}). ` +
           `Answering deterministically from dataset ${insight.datasetId}.`,
       );
     }
 
+    // Provider and model are null, not the configured ones. A deterministic
+    // answer was not written by any model, and logging the model that *would*
+    // have been called is precisely the kind of near-truth the audit trail must
+    // not contain.
     return {
       text: this.deterministicAnswer(question, insight),
       source: 'unavailable',
       model: null,
+      provider: null,
     };
   }
 

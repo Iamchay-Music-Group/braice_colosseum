@@ -1,10 +1,7 @@
 import { SetMetadata, CanActivate, ExecutionContext, Injectable, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PermissionsService } from '../../permissions/permissions.service';
-import {
-  CurrentPrincipal,
-  AuthenticatedRequest,
-} from '../../../common/guards/jwt-auth.guard';
+import { AuthenticatedRequest } from '../../../common/guards/jwt-auth.guard';
 import { Operation } from '../../../common/interfaces/permission.interface';
 
 export const REQUIRED_PERMISSION = 'required_permission';
