@@ -8,7 +8,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "prebuild": "rimraf dist",
+    "//prebuild": "The three workspace dependencies resolve through node_modules symlinks to their `types`, which points at dist/. Nothing here can see their sources: tsconfig.json sets rootDir to ./src, so mapping the paths at packages/*/src instead would fail the emit with TS6059. The dependencies therefore have to be BUILT first, and this script is what guarantees that, because `nest build` on its own is not enough. Anything that runs this package's build directly - `pnpm --filter @braice/api build`, or Vercel's NestJS framework preset, which runs bare `nest build` - otherwise fails with 36 errors of TS2307 'Cannot find module @braice/permission-engine', followed by TS7006 downstream wherever a type from one of those packages was inferring a parameter. The selector `@braice/api^...` is the dependencies WITHOUT this package, so it cannot recurse back into here. pnpm runs dependencies in topological order, so governance-engine and types are built before the packages that import them.",
+    "prebuild": "rimraf dist && pnpm --filter \"@braice/api^...\" run build",
     "build": "nest build",
     "start": "nest start",
     "dev": "nest start --watch",
