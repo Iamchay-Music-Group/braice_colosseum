@@ -21,7 +21,7 @@
  */
 
 import { createRequire } from 'module';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 const BASE_URL = process.env.API_URL ?? 'http://localhost:3001/api';
@@ -173,13 +173,42 @@ async function signInAs(
  * is not a login: the account is already authenticated, and the only thing the
  * signature establishes is that this wallet may be used as the on-chain
  * grantee pubkey when a permission is anchored.
+ *
+ * `keypairPath` links an existing key rather than a throwaway. That matters for
+ * the creator: the program binds `community.authority` to the key that signs
+ * `initialize_community`, which is whatever SOLANA_KEYPAIR_PATH holds, and then
+ * rejects every later write not signed by that same key. Linking the creator to
+ * a different generated keypair would put a wallet address on the community
+ * operator that cannot sign anything for it — the anchor would work, but every
+ * address shown in the demo would be a dead end for a verifier.
+ *
+ * Solana keypairs are Ed25519, so the CLI's 64-byte secret key contains the
+ * 32-byte seed tweetnacl wants as its first 32 bytes.
  */
 async function linkWallet(
   token: string,
+  keypairPath?: string,
 ): Promise<{ wallet: string; linked: boolean }> {
   const { nacl, bs58 } = loadCrypto();
 
-  const keypair = nacl.sign.keyPair();
+  let keypair: { publicKey: Uint8Array; secretKey: Uint8Array };
+  if (keypairPath) {
+    const parsed = JSON.parse(readFileSync(keypairPath, 'utf8')) as
+      | number[]
+      | { secretKey: string };
+    const secretKey = Array.isArray(parsed)
+      ? Uint8Array.from(parsed)
+      : Uint8Array.from(Buffer.from(parsed.secretKey, 'base64'));
+    if (secretKey.length !== 64) {
+      throw new Error(
+        `Keypair at ${keypairPath} is ${secretKey.length} bytes; Solana keypairs are 64.`,
+      );
+    }
+    keypair = nacl.sign.keyPair.fromSeed(secretKey.slice(0, 32));
+  } else {
+    keypair = nacl.sign.keyPair();
+  }
+
   const wallet = bs58.encode(keypair.publicKey);
 
   const { nonce, message } = await api<{ nonce: string; message: string }>(
@@ -222,10 +251,28 @@ async function main(): Promise<void> {
   log('auth', `brand    ${brand.email}`);
   log('auth', `agent    ${agent.email}`);
 
-  // The AI agent links a wallet so the permission issued to it below has an
-  // on-chain grantee pubkey. The creator and brand deliberately do not: their
-  // grants are authorised off-chain and never anchored, which is a supported
-  // path, not a gap.
+  // The creator links the configured signing key, because that key is the
+  // community's on-chain authority: `initialize_community` binds
+  // community.authority to it, and every later permission or decision write
+  // must carry its signature. Attaching a generated keypair here instead would
+  // put a wallet address on the operator that can never sign for it.
+  //
+  // If no keypair is configured the creator simply has no wallet, which is a
+  // supported state: grants stay fully enforceable off-chain, just unanchored.
+  const authorityKeypair = process.env.SOLANA_KEYPAIR_PATH;
+  let creatorWallet: string | null = null;
+  if (authorityKeypair && existsSync(authorityKeypair)) {
+    creatorWallet = (await linkWallet(creator.token, authorityKeypair)).wallet;
+    log('wallet', `creator linked authority ${creatorWallet}`);
+  } else {
+    log('wallet', 'creator has no wallet (SOLANA_KEYPAIR_PATH unset) - anchoring off');
+  }
+
+  // The AI agent links a throwaway wallet so the permission issued to it below has
+  // an on-chain grantee pubkey. The grantee only has to be a pubkey the grant is
+  // addressed to; it never signs. The brand deliberately does not link one: its
+  // grant is authorised off-chain and never anchored, which is a supported path,
+  // not a gap.
   const agentWallet = await linkWallet(agent.token);
   log('wallet', `agent linked ${agentWallet.wallet} (anchoring enabled)`);
 

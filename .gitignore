@@ -42,3 +42,14 @@ coverage/
 # Solana
 programs/braice-governance/target/
 programs/braice-governance/.anchor/
+# `solana-test-validator --reset --bpf-program ...` writes a full ledger here
+# (rocksdb, genesis, snapshots, ~360 MB). It is a disposable local validator
+# state directory that happened to be committed, along with its faucet/validator/
+# vote/stake keypairs — localnet-only keys, so nothing secret leaks, but it makes
+# the repo enormous and it is not reproducible state worth keeping. Delete the
+# directory freely; recreating it is one command.
+programs/braice-governance/test-ledger/
+# The Anchor workspace carries a package.json only so its integration test can
+# resolve @braice/blockchain-client and web3.js. The Rust builds with cargo, so
+# the dependency tree belongs in pnpm's store, not in git.
+programs/*/node_modules/

@@ -10,22 +10,37 @@ import {
 import { ACCOUNT_DISCRIMINATOR } from './constants';
 import { BorshReader, deriveOnChainId } from './encoding';
 import {
+  activeRulesPda,
+  buildActivateRuleset,
   buildCreatePermission,
+  buildHandoverToSharedGovernance,
   buildInitializeCommunity,
+  buildInitializeRuleset,
+  buildProposeRuleset,
   buildRecordGovernanceDecision,
+  buildRecordMembershipDelta,
   buildRevokePermission,
   permissionPda,
   permissionPdaFromAccount,
+  ruleSetPda,
+  type ActivateRuleSetParams,
   type CreatePermissionParams,
+  type HandoverToSharedGovernanceParams,
   type InitializeCommunityParams,
+  type InitializeRuleSetParams,
+  type ProposeRuleSetParams,
   type RecordGovernanceDecisionParams,
+  type RecordMembershipDeltaParams,
   type RevokePermissionParams,
 } from './transaction-builder';
 import {
   AnchoredPermissionStatus,
   GovernanceProgramError,
+  RuleMode,
   describeGovernanceError,
+  type AnchoredActiveRules,
   type AnchoredPermission,
+  type AnchoredRuleSet,
   type SolanaClientConfig,
 } from './types';
 
@@ -163,11 +178,141 @@ export class GovernanceAnchorClient {
     return decodePermissionState(Buffer.from(account.data));
   }
 
-  /** Whether a transaction signature is present on chain at this commitment. */
+  /**
+   * Read the community's live ruleset pointer.
+   *
+   * This is the account every access decision ultimately traces back to: it names
+   * the version in force, and the mode that says who may change it. Returns null
+   * before `initialize_ruleset` has run, which is the honest answer rather than a
+   * default of "version 1, creator control" that was never written down.
+   */
+  async fetchActiveRules(
+    communityId: string,
+  ): Promise<AnchoredActiveRules | null> {
+    const [address] = activeRulesPda(this.programId, communityId);
+    return this.fetchAccount(address, decodeActiveRules);
+  }
+
+  /**
+   * Read one ruleset version.
+   *
+   * Returns null for a version that was never created. Note that a version can
+   * exist with `activatedAt === 0` - proposed but not in force - so callers that
+   * care about which rules apply must read `fetchActiveRules` and not treat any
+   * existing version as the live one.
+   */
+  async fetchRuleSet(
+    communityId: string,
+    version: number,
+  ): Promise<AnchoredRuleSet | null> {
+    const [address] = ruleSetPda(this.programId, communityId, version);
+    return this.fetchAccount(address, decodeRuleSet);
+  }
+
+  /**
+   * Whether a transaction signature is present on chain at this commitment.
+   */
   async confirmSignature(signature: string): Promise<boolean> {
     const status = await this.connection.getSignatureStatuses([signature]);
     const first = status.value[0];
     return Boolean(first?.err === null && first?.confirmationStatus);
+  }
+
+  /**
+   * Anchor a community's genesis ruleset as version 1 and make it live.
+   *
+   * Creates the version and the live pointer in one transaction, so a community
+   * cannot end up pointing at no rules at all.
+   */
+  async initializeRuleset(params: InitializeRuleSetParams): Promise<string> {
+    const ix = buildInitializeRuleset(
+      this.programId,
+      this.signer.publicKey,
+      this.signer.publicKey,
+      params,
+    );
+    return this.send([ix]);
+  }
+
+  /** Create the next ruleset version without activating it. */
+  async proposeRuleset(params: ProposeRuleSetParams): Promise<string> {
+    const ix = buildProposeRuleset(
+      this.programId,
+      this.signer.publicKey,
+      this.signer.publicKey,
+      params,
+    );
+    return this.send([ix]);
+  }
+
+  /**
+   * Make a proposed version live.
+   *
+   * `approvers` are the other keys that must sign. The program requires
+   * `threshold_bps` of the active member count in distinct signers under shared
+   * governance, and collapses duplicates including the authority.
+   *
+   * The signing keypair for each approver is not held here - the caller has to
+   * arrange for them to sign - so this method only builds the transaction shape
+   * the caller needs, and `send` will fail with a missing-signature error naming
+   * the account. That failure is correct behaviour, not a bug to paper over: it
+   * means the threshold genuinely was not met.
+   */
+  async activateRuleset(
+    params: ActivateRuleSetParams,
+    approvers: readonly PublicKey[] = [],
+  ): Promise<string> {
+    const ix = buildActivateRuleset(
+      this.programId,
+      this.signer.publicKey,
+      this.signer.publicKey,
+      params,
+      approvers,
+    );
+    return this.send([ix]);
+  }
+
+  /** Report a membership change, moving the on-chain handover trigger. */
+  async recordMembershipDelta(
+    params: RecordMembershipDeltaParams,
+  ): Promise<string> {
+    const ix = buildRecordMembershipDelta(
+      this.programId,
+      this.signer.publicKey,
+      this.signer.publicKey,
+      params,
+    );
+    return this.send([ix]);
+  }
+
+  /**
+   * Move a community to shared governance.
+   *
+   * Irreversible and rejected on a second call, so the caller should have
+   * verified the active member count first rather than treating this as
+   * retry-safe.
+   */
+  async handoverToSharedGovernance(
+    params: HandoverToSharedGovernanceParams,
+  ): Promise<string> {
+    const ix = buildHandoverToSharedGovernance(
+      this.programId,
+      this.signer.publicKey,
+      this.signer.publicKey,
+      params,
+    );
+    return this.send([ix]);
+  }
+
+  private async fetchAccount<T>(
+    address: PublicKey,
+    decode: (data: Buffer) => T,
+  ): Promise<T | null> {
+    const account = await this.connection.getAccountInfo(address, this.commitment);
+    if (!account) {
+      return null;
+    }
+    return decode(Buffer.from(account.data));
   }
 
   private async send(instructions: TransactionInstruction[]): Promise<string> {
@@ -288,6 +433,87 @@ export function decodePermissionState(data: Buffer): AnchoredPermission {
     expiresAt,
     revokedAt,
     status,
+    bump,
+  };
+}
+
+/**
+ * Decode a `RuleMode` byte.
+ *
+ * A `u8` on the wire rather than an enum tag the decoder has seen before. An
+ * unrecognised value means the account was written by a program version that
+ * added a mode this client does not know, and guessing the nearest one would
+ * report the wrong authority structure for a community - the sort of error that
+ * makes an access decision for the user.
+ */
+function decodeRuleMode(value: number): RuleMode {
+  if (value === RuleMode.CreatorControl || value === RuleMode.SharedGovernance) {
+    return value;
+  }
+  throw new Error(`Unknown RuleMode byte ${value}`);
+}
+
+/**
+ * Decode a `RuleSet` account.
+ *
+ * Field order and widths must match `state::RuleSet`. The buffer is required to
+ * be consumed exactly, so a field added or reordered in Rust turns into a loud
+ * failure here instead of a plausible-looking `version` that is really a
+ * `threshold_bps`.
+ */
+export function decodeRuleSet(data: Buffer): AnchoredRuleSet {
+  const reader = new BorshReader(data);
+  reader.expectDiscriminator(ACCOUNT_DISCRIMINATOR.ruleSet, 'RuleSet');
+
+  const communityId = reader.fixed32();
+  const version = reader.u32();
+  const mode = decodeRuleMode(reader.u8());
+  const thresholdBps = reader.u16();
+  const quorumBps = reader.u16();
+  const minActiveMembers = reader.u32();
+  const rulesHash = reader.fixed32();
+  const previousVersion = reader.u32();
+  const createdAt = reader.i64();
+  const activatedAt = reader.i64();
+  const bump = reader.u8();
+  reader.expectExhausted('RuleSet');
+
+  return {
+    communityId,
+    version,
+    mode,
+    thresholdBps,
+    quorumBps,
+    minActiveMembers,
+    rulesHash,
+    previousVersion,
+    createdAt,
+    activatedAt,
+    bump,
+  };
+}
+
+/** Decode an `ActiveRules` account. Layout mirrors `state::ActiveRules`. */
+export function decodeActiveRules(data: Buffer): AnchoredActiveRules {
+  const reader = new BorshReader(data);
+  reader.expectDiscriminator(ACCOUNT_DISCRIMINATOR.activeRules, 'ActiveRules');
+
+  const communityId = reader.fixed32();
+  const version = reader.u32();
+  const mode = decodeRuleMode(reader.u8());
+  const activeMemberCount = reader.u32();
+  const activatedAt = reader.i64();
+  const handedOverAt = reader.i64();
+  const bump = reader.u8();
+  reader.expectExhausted('ActiveRules');
+
+  return {
+    communityId,
+    version,
+    mode,
+    activeMemberCount,
+    activatedAt,
+    handedOverAt,
     bump,
   };
 }

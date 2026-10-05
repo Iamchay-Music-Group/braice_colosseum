@@ -25,6 +25,19 @@ export enum AnchoredPermissionStatus {
   Revoked = 1,
 }
 
+/**
+ * Authority structure a community currently governs under.
+ *
+ * Mirror of `constants::RuleMode` in the Rust program. The numeric values are
+ * the on-chain discriminants and are part of the wire format.
+ */
+export enum RuleMode {
+  /** The creator's key alone can change the rules. Bounded by `min_active_members`. */
+  CreatorControl = 0,
+  /** Rule changes need threshold signatures. Set once, by handover, and never undone. */
+  SharedGovernance = 1,
+}
+
 export interface SolanaClientConfig {
   /** JSON-RPC endpoint. */
   rpcUrl: string;
@@ -52,6 +65,37 @@ export interface AnchoredPermission {
   bump: number;
 }
 
+/** One immutable ruleset version, as the chain records it. */
+export interface AnchoredRuleSet {
+  communityId: Uint8Array;
+  version: number;
+  mode: RuleMode;
+  thresholdBps: number;
+  quorumBps: number;
+  /** Active member count at which the creator scheduled handover. 0 means never. */
+  minActiveMembers: number;
+  /** SHA-256 of the canonical off-chain ruleset JSON. */
+  rulesHash: Uint8Array;
+  /** The version this replaced, or 0 for genesis. */
+  previousVersion: number;
+  createdAt: number;
+  /** 0 while the version is proposed but not yet in force. */
+  activatedAt: number;
+  bump: number;
+}
+
+/** The single account naming which ruleset version is in force. */
+export interface AnchoredActiveRules {
+  communityId: Uint8Array;
+  version: number;
+  mode: RuleMode;
+  activeMemberCount: number;
+  activatedAt: number;
+  /** 0 until handover happens; non-zero afterwards, permanently. */
+  handedOverAt: number;
+  bump: number;
+}
+
 /**
  * On-chain program error codes.
  *
@@ -72,6 +116,18 @@ export const GOVERNANCE_ERROR = {
   PermissionAlreadyRevoked: 6002,
   InvalidTimestamp: 6003,
   AuthorityMismatch: 6004,
+  RulesetAlreadyInitialized: 6005,
+  RulesetVersionNotSequential: 6006,
+  RulesetHasPredecessor: 6007,
+  RulesetPredecessorMismatch: 6008,
+  ThresholdOutOfRange: 6009,
+  QuorumAboveThreshold: 6010,
+  AlreadyHandedOver: 6011,
+  HandoverThresholdNotMet: 6012,
+  MemberCountUnderflow: 6013,
+  NoActiveRuleset: 6014,
+  RulesetAlreadyActivated: 6015,
+  InsufficientApprovals: 6016,
 } as const;
 
 const ERROR_MESSAGES: Record<number, string> = {
@@ -84,6 +140,30 @@ const ERROR_MESSAGES: Record<number, string> = {
   [GOVERNANCE_ERROR.InvalidTimestamp]: 'Timestamps overflow the supported range',
   [GOVERNANCE_ERROR.AuthorityMismatch]:
     'Payer does not match the declared community authority',
+  [GOVERNANCE_ERROR.RulesetAlreadyInitialized]:
+    'This community already has a genesis ruleset',
+  [GOVERNANCE_ERROR.RulesetVersionNotSequential]:
+    'Ruleset versions must increase by exactly one',
+  [GOVERNANCE_ERROR.RulesetHasPredecessor]:
+    'Only the genesis ruleset may have no predecessor',
+  [GOVERNANCE_ERROR.RulesetPredecessorMismatch]:
+    'Ruleset predecessor does not match the version in force',
+  [GOVERNANCE_ERROR.ThresholdOutOfRange]:
+    'Threshold must be between 1 and 10000 basis points',
+  [GOVERNANCE_ERROR.QuorumAboveThreshold]:
+    'Quorum cannot exceed the approval threshold',
+  [GOVERNANCE_ERROR.AlreadyHandedOver]:
+    'This community has already handed over to shared governance',
+  [GOVERNANCE_ERROR.HandoverThresholdNotMet]:
+    'Active member count has not reached min_active_members',
+  [GOVERNANCE_ERROR.MemberCountUnderflow]:
+    'Membership change would drive the active member count below zero',
+  [GOVERNANCE_ERROR.NoActiveRuleset]:
+    'No ruleset is in force for this community',
+  [GOVERNANCE_ERROR.RulesetAlreadyActivated]:
+    'This ruleset version is already in force',
+  [GOVERNANCE_ERROR.InsufficientApprovals]:
+    'Not enough distinct signer approvals to meet the threshold',
 };
 
 /**

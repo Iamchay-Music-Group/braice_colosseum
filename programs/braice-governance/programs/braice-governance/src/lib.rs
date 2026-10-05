@@ -100,4 +100,69 @@ pub mod braice_governance {
             outcome,
         )
     }
+
+    /// Record a community's first (genesis) ruleset and activate it.
+    pub fn initialize_ruleset(
+        ctx: Context<InitializeRuleSet>,
+        version: u32,
+        rules_hash: [u8; 32],
+        threshold_bps: u16,
+        quorum_bps: u16,
+        min_active_members: u32,
+    ) -> Result<()> {
+        instructions::initialize_ruleset::initialize_ruleset(
+            ctx,
+            version,
+            rules_hash,
+            threshold_bps,
+            quorum_bps,
+            min_active_members,
+        )
+    }
+
+    /// Create the next ruleset version without activating it.
+    pub fn propose_ruleset(
+        ctx: Context<ProposeRuleSet>,
+        version: u32,
+        rules_hash: [u8; 32],
+        threshold_bps: u16,
+        quorum_bps: u16,
+        min_active_members: u32,
+    ) -> Result<()> {
+        instructions::propose_ruleset::propose_ruleset(
+            ctx,
+            version,
+            rules_hash,
+            threshold_bps,
+            quorum_bps,
+            min_active_members,
+        )
+    }
+
+    /// Make a proposed ruleset version the one in force.
+    ///
+    /// The only instruction that writes the live ruleset. Under
+    /// `CreatorControl` the community authority alone suffices; under
+    /// `SharedGovernance` it must be accompanied by enough distinct approvers
+    /// in `remaining_accounts` to meet the version's threshold.
+    pub fn activate_ruleset(ctx: Context<ActivateRuleSet>, version: u32) -> Result<()> {
+        instructions::activate_ruleset::activate_ruleset(ctx, version)
+    }
+
+    /// Report a change in active membership for the handover trigger.
+    pub fn record_membership_delta(
+        ctx: Context<RecordMembershipDelta>,
+        delta: i32,
+    ) -> Result<()> {
+        instructions::record_membership_delta::record_membership_delta(ctx, delta)
+    }
+
+    /// Move a community from creator control to shared governance, once the
+    /// creator's own `min_active_members` threshold has been reached.
+    pub fn handover_to_shared_governance(
+        ctx: Context<HandoverToSharedGovernance>,
+        version: u32,
+    ) -> Result<()> {
+        instructions::handover_to_shared_governance::handover_to_shared_governance(ctx, version)
+    }
 }

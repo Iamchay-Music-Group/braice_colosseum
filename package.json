@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "BRAICE - Community Governance Permission Infrastructure",
+  "//packageManager": "Pinned so `corepack enable` resolves the same pnpm in local dev, in GitHub Actions and in the Dockerfile. Without this, corepack downloads whatever is newest, and pnpm 12 rejects the pnpm-11-only `pnpm deploy --legacy` the production image is built with.",
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api dev",
     "build": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api build",
@@ -11,6 +16,7 @@
     "test:cov": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api test:cov",
     "lint": "pnpm --filter @braice/api lint",
     "seed": "pnpm --filter @braice/api seed:demo",
+    "deploy:devnet": "pnpm build:client && pnpm --filter @braice/api exec ts-node ../../scripts/deploy-devnet.ts",
     "db:migrate": "pnpm --filter @braice/api db:migrate",
     "db:seed": "pnpm --filter @braice/api db:seed",
     "docker:up": "docker-compose up -d",

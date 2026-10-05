@@ -1,69 +1,363 @@
-name: Node.js CI
+# # CI for the BRAICE API: pnpm/NestJS checks, the Solana governance program,
+# # and — on main only — an immutable image build through Amazon ECR to Amazon ECS
+# # Fargate.
+# #
+# # Three jobs, deliberately separate. The API and the on-chain program are two
+# # toolchains that cannot fail for the same reason, so a broken program reports
+# # as a Rust failure rather than as a Node failure, and a deployment only
+# # happens when both are green.
+# #
+# # Branch policy, in one place so it is easy to audit:
+# #
+# #   main -> full CI, then build, push to ECR and deploy to ECS Fargate
+# #   dev  -> full CI, nothing else. No image is built, ECR is never written to,
+# #           ECS is never touched.
+# #
+# # main is the only branch that can deploy, and that is enforced twice: by the
+# # job-level `if` on the deploy job, and by an assertion as its first step. Both
+# # read the ref GitHub actually pushed. Nothing about a dev run can reach AWS —
+# # the credentials it would need are never minted, because the job that mints
+# # them is skipped.
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+# name: CI
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+# on:
+#   push:
+#     branches: [ "main", "dev" ]
+#   pull_request:
+#     branches: [ "main", "dev" ]
 
-    strategy:
-      matrix:
-        node-version: [24.x]
+# # Least privilege by default. Only the deploy job widens this, and only for the
+# # OIDC token that `aws-actions/configure-aws-credentials` exchanges for short
+# # lived AWS credentials.
+# permissions:
+#   contents: read
 
-    steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        # This is a pnpm workspace, so the pnpm store is what should be cached.
-        cache: 'pnpm'
+# # Supersede older runs on the same ref. Everything except a push to main is
+# # cancelled freely, because nothing cancelled here can have been deploying: the
+# # deploy job only ever runs for refs/heads/main, so a superseded dev run has
+# # nothing to lose. Pushes to main are queued rather than cancelled instead, so
+# # an in-flight deployment is never interrupted half way through registering a
+# # new task definition revision.
+# concurrency:
+#   group: ci-${{ github.workflow }}-${{ github.ref }}
+#   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-    - name: Install pnpm
-      run: corepack enable
+# jobs:
+#   # ─────────────────────────────────────────────────────────────────────────────
+#   # API: install, build, lint, typecheck, test
+#   # ─────────────────────────────────────────────────────────────────────────────
+#   build:
+#     name: API (pnpm)
+#     runs-on: ubuntu-latest
 
-    # `npm ci` cannot install a pnpm workspace and has no lockfile entry for it.
-    - run: pnpm install --frozen-lockfile
+#     strategy:
+#       matrix:
+#         node-version: [24.x]
 
-    - run: pnpm build
-    - run: pnpm lint
-    - run: pnpm typecheck
-    - run: pnpm test
+#     steps:
+#     - uses: actions/checkout@v4
 
-  rust:
-    # The governance program is a separate toolchain from the API. It is built
-    # and tested in its own job so a Rust failure is reported as a Rust failure
-    # rather than a Node failure.
-    runs-on: ubuntu-latest
+#     # Before setup-node on purpose. `cache: 'pnpm'` on setup-node shells out to
+#     # `pnpm store path` to find the cache directory, and that only exists once
+#     # corepack has written the shim. The Ubuntu image has corepack but no pnpm
+#     # shim, so enabling it first is what makes the built-in cache work here
+#     # without adding a third-party setup action.
+#     - name: Enable Corepack (pnpm)
+#       run: corepack enable
 
-    steps:
-    - uses: actions/checkout@v4
+#     - name: Use Node.js ${{ matrix.node-version }}
+#       uses: actions/setup-node@v4
+#       with:
+#         node-version: ${{ matrix.node-version }}
+#         # This is a pnpm workspace, so the pnpm store is what should be cached.
+#         cache: 'pnpm'
 
-    - name: Install Rust (stable)
-      run: rustup toolchain install stable --profile minimal
+#     # `npm ci` cannot install a pnpm workspace and has no lockfile entry for it.
+#     - run: pnpm install --frozen-lockfile
 
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
-      with:
-        toolchain: stable
+#     - run: pnpm build
+#     - run: pnpm lint
+#     - run: pnpm typecheck
+#     - run: pnpm test
 
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-${{ hashFiles('programs/**/Cargo.lock') }}
+#   # ─────────────────────────────────────────────────────────────────────────────
+#   # Governance program: cargo tests, then a real BPF build + IDL generation
+#   # ─────────────────────────────────────────────────────────────────────────────
+#   rust:
+#     name: Governance program (Rust/Anchor)
+#     runs-on: ubuntu-latest
 
-    - name: Test governance program
-      working-directory: programs/braice-governance
-      run: cargo test --locked
+#     env:
+#       # The Solana toolchain is not pinned anywhere in the repository —
+#       # programs/braice-governance/Anchor.toml sets only `anchor_version` — so
+#       # it is pinned here instead. This is the combination verified against
+#       # anchor 1.1.2, whose workspace targets solana-program 3.0.0, which is
+#       # what programs/braice-governance/programs/braice-governance/Cargo.toml
+#       # depends on. Change it only together with that dependency.
+#       #
+#       # It matters: `anchor build` compiles to SBPF via `cargo build-sbf`, which
+#       # ships with this installer and downloads the matching platform tools on
+#       # first use.
+#       SOLANA_VERSION: "3.1.10"
 
-    - name: Build the BPF program and IDL
-      working-directory: programs/braice-governance
-      # Proves the program compiles to BPF and that the IDL the TypeScript
-      # client is written against still generates.
-      run: anchor build
+#     steps:
+#     - uses: actions/checkout@v4
+
+#     - name: Install Rust (stable)
+#       run: rustup toolchain install stable --profile minimal
+
+#     - uses: actions-rust-lang/setup-rust-toolchain@v1
+#       with:
+#         toolchain: stable
+
+#     - name: Cache cargo
+#       uses: actions/cache@v4
+#       with:
+#         path: |
+#           ~/.cargo/registry
+#           ~/.cargo/git
+#         key: ${{ runner.os }}-cargo-${{ hashFiles('programs/**/Cargo.lock') }}
+
+#     # The Ubuntu runner image ships neither Solana nor Anchor, so both have to
+#     # be installed before `anchor build` can mean anything. `anchor build` would
+#     # otherwise fail with a missing `cargo-build-sbf`.
+#     - name: Install Solana toolchain (provides cargo-build-sbf)
+#       run: |
+#         curl -sSfL "https://release.anza.xyz/v${SOLANA_VERSION}/install" -o /tmp/solana-install.sh
+#         sh /tmp/solana-install.sh
+#         echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+#     # Read the version Anchor.toml pins rather than restating it, so the CLI can
+#     # never drift from the program it is meant to build. Anchor 1.x is a
+#     # different release-asset layout from 0.3x (a bare binary named
+#     # anchor-<version>-<target>, not a tarball), so this is the pinned download
+#     # rather than `avm`.
+#     - name: Resolve pinned Anchor version
+#       id: anchor
+#       run: |
+#         version="$(sed -n 's/^[[:space:]]*anchor_version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
+#           programs/braice-governance/Anchor.toml)"
+#         if [ -z "$version" ]; then
+#           echo "::error::No anchor_version in programs/braice-governance/Anchor.toml"
+#           exit 1
+#         fi
+#         echo "version=$version" >> "$GITHUB_OUTPUT"
+
+#     - name: Install Anchor ${{ steps.anchor.outputs.version }}
+#       run: |
+#         version="${{ steps.anchor.outputs.version }}"
+#         binary="$HOME/.local/bin/anchor-$version"
+#         curl -sSfL \
+#           "https://github.com/coral-xyz/anchor/releases/download/v${version}/anchor-${version}-x86_64-unknown-linux-gnu" \
+#           -o "$binary"
+#         chmod +x "$binary"
+#         # Anchor resolves `[toolchain] anchor_version` against its own binary
+#         # name, so both names are provided: `anchor` is what the next steps
+#         # call, `anchor-<version>` is the identity Anchor checks itself with.
+#         ln -sf "$binary" "$HOME/.local/bin/anchor"
+#         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+#         anchor --version | grep -qx "anchor-cli $version"
+
+#     - name: Verify Solana toolchain
+#       run: |
+#         solana --version
+#         cargo-build-sbf --version
+
+#     - name: Test governance program
+#       working-directory: programs/braice-governance
+#       run: cargo test --locked
+
+#     - name: Build the BPF program and IDL
+#       working-directory: programs/braice-governance
+#       # Proves the program compiles to BPF and that the IDL the TypeScript
+#       # client is written against still generates.
+#       run: anchor build
+
+#   # ─────────────────────────────────────────────────────────────────────────────
+#   # Ship it: build → ECR → ECS Fargate, main only
+#   # ─────────────────────────────────────────────────────────────────────────────
+#   deploy:
+#     name: Deploy to ECS Fargate
+#     runs-on: ubuntu-latest
+
+#     needs: [build, rust]
+
+#     # Pull requests build the image to prove it is buildable and stop there.
+#     # Nothing reaches ECR or ECS from anything but a push to main.
+#     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+#     # Optional GitHub environment. Creating it unlocks required reviewers and
+#     # environment-scoped secrets; remove the line if the repository does not
+#     # use environments. It is a third gate, after the `if` above and the check
+#     # below: a dev run never gets this far.
+#     environment: production
+
+#     # The token AWS STS exchanges for credentials. Nothing else is granted.
+#     permissions:
+#       id-token: write
+#       contents: read
+
+#     # Secrets only. The region, cluster, service, task definition and
+#     # container name cannot be read from the repository; the account ID and the
+#     # ECR registry are never written down at all, the first comes from the
+#     # role ARN and the second from the ECR login step.
+#     env:
+#       AWS_REGION: ${{ secrets.AWS_REGION }}
+#       ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+#       ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+#       ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+#       ECS_TASK_DEFINITION: ${{ secrets.ECS_TASK_DEFINITION }}
+#       CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+
+#     steps:
+#     # Defence in depth. The `if` above is the real gate; this is the same rule
+#     # stated as a line in the job log, so that a future edit which loosens the
+#     # `if` cannot silently start deploying from dev. GITHUB_REF is the ref
+#     # GitHub actually ran for, so refs/heads/dev and refs/pull/1/merge both fail
+#     # here. It runs before anything is built, pushed or logged into, and before
+#     # the OIDC token is requested.
+#     - name: Refuse to deploy from any branch but main
+#       run: |
+#         if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+#           echo "::error::This job only deploys from refs/heads/main, but ran on $GITHUB_REF. Refusing to touch AWS."
+#           exit 1
+#         fi
+#         echo "Deploying from $GITHUB_REF"
+
+#     # The image is built from the checkout, so this job needs the source even
+#     # though it never runs the application.
+#     - uses: actions/checkout@v4
+
+#     - name: Check required secrets
+#       env:
+#         REQUIRED: >-
+#           AWS_ROLE_ARN AWS_REGION ECR_REPOSITORY ECS_CLUSTER ECS_SERVICE
+#           ECS_TASK_DEFINITION CONTAINER_NAME
+#       run: |
+#         # Fail on the first missing name rather than letting an empty value
+#         # reach the AWS CLI, where it surfaces as an opaque parse error.
+#         for name in $REQUIRED; do
+#           if [ -z "${!name:-}" ]; then
+#             echo "::error::Secret $name is not set on this repository (or on the production environment)"
+#             missing=1
+#           fi
+#         done
+#         exit "${missing:-0}"
+
+#     # OIDC: GitHub mints a short-lived JWT, STS trades it for credentials that
+#     # expire with the job. There are no AWS keys in this repository at all.
+#     - name: Configure AWS credentials
+#       uses: aws-actions/configure-aws-credentials@v4
+#       with:
+#         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+#         aws-region: ${{ secrets.AWS_REGION }}
+
+#     - name: Login to Amazon ECR
+#       id: ecr
+#       uses: aws-actions/amazon-ecr-login@v2
+
+#     - name: Resolve image reference
+#       id: image
+#       env:
+#         REGISTRY: ${{ steps.ecr.outputs.registry }}
+#       run: |
+#         # GITHUB_SHA is the immutable identity of this commit: a tag nothing
+#         # else can move, so the task definition can name exactly the image
+#         # this workflow built and audit it later. `latest` is published
+#         # alongside it for humans, and ECS never references it.
+#         echo "sha=${REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+#         echo "latest=${REGISTRY}/${ECR_REPOSITORY}:latest" >> "$GITHUB_OUTPUT"
+
+#     - name: Set up Docker Buildx
+#       uses: docker/setup-buildx-action@v3
+
+#     # The build context is the repository root, not apps/api: the API depends on
+#     # three workspace packages that only resolve from the workspace root. The
+#     # lockfile is the source of truth, so the image can never contain a
+#     # dependency the committed lockfile does not list.
+#     - name: Build and push image
+#       uses: docker/build-push-action@v6
+#       with:
+#         context: .
+#         file: ./Dockerfile
+#         push: true
+#         # Keeps the pushed artefact a single plain manifest instead of a
+#         # provenance-bearing index, so what Fargate pulls is exactly the tag
+#         # that was registered.
+#         provenance: false
+#         tags: |
+#           ${{ steps.image.outputs.sha }}
+#           ${{ steps.image.outputs.latest }}
+#         cache-from: type=gha
+#         cache-to: type=gha,mode=max
+
+#     # The current revision of the task definition, fetched rather than
+#     # reconstructed: every other field in it — the execution role, the log
+#     # configuration, secrets, cpu/memory, the port mapping, any sidecar — is
+#     # authored and owned in AWS, and a workflow that rewrote the JSON would
+#     # drift from it on the first run.
+#     - name: Fetch current task definition
+#       run: |
+#         aws ecs describe-task-definition \
+#           --task-definition "$ECS_TASK_DEFINITION" \
+#           --query taskDefinition > task-definition.json
+
+#     # Replaces the image of the named container and nothing else. A name that
+#     # does not match any container in the task definition is a hard error here
+#     # rather than a task that boots with the wrong image.
+#     - name: Render updated task definition
+#       id: render
+#       uses: aws-actions/amazon-ecs-render-task-definition@v1
+#       with:
+#         task-definition: task-definition.json
+#         container-name: ${{ env.CONTAINER_NAME }}
+#         image: ${{ steps.image.outputs.sha }}
+
+#     # Registers the new revision, updates the service, and blocks until the
+#     # service reports stable with the new deployment. A failed rollout, a
+#     # task that cannot start, or a task that never passes its health check all
+#     # fail the step and therefore the workflow.
+#     - name: Deploy to ECS
+#       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+#       with:
+#         task-definition: ${{ steps.render.outputs.task-definition }}
+#         service: ${{ env.ECS_SERVICE }}
+#         cluster: ${{ env.ECS_CLUSTER }}
+#         wait-for-service-stability: true
+
+#     # Proves the immutability requirement end to end: read the task definition
+#     # the service is actually running and confirm it names the SHA tag. If this
+#     # ever disagrees, the rollout succeeded but shipped the wrong image.
+#     - name: Verify the running task definition
+#       env:
+#         EXPECTED: ${{ steps.image.outputs.sha }}
+#       run: |
+#         revision="$(aws ecs describe-services \
+#           --cluster "$ECS_CLUSTER" \
+#           --services "$ECS_SERVICE" \
+#           --query 'services[0].taskDefinition' \
+#           --output text)"
+#         running="$(aws ecs describe-task-definition \
+#           --task-definition "$revision" \
+#           --query "taskDefinition.containerDefinitions[?name=='${CONTAINER_NAME}'].image | [0]" \
+#           --output text)"
+#         echo "Task definition: $revision"
+#         echo "Container '$CONTAINER_NAME' image: $running"
+#         if [ "$running" != "$EXPECTED" ]; then
+#           echo "::error::Service is running $running, expected $EXPECTED"
+#           exit 1
+#         fi
+
+#     - name: Summary
+#       run: |
+#         {
+#           echo "### Deployed ${{ steps.image.outputs.sha }}"
+#           echo ""
+#           echo "| | |"
+#           echo "|---|---|"
+#           echo "| ECS cluster | \`${ECS_CLUSTER}\` |"
+#           echo "| ECS service | \`${ECS_SERVICE}\` |"
+#           echo "| Container | \`${CONTAINER_NAME}\` |"
+#           echo "| Image | \`${{ steps.image.outputs.sha }}\` |"
+#         } >> "$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,7 @@ import { PublicKey } from '@solana/web3.js';
 import {
   DecisionOutcome,
   GovernanceAnchorClient,
+  sha256Utf8,
   type Commitment,
   type SolanaClientConfig,
 } from '@braice/blockchain-client';
@@ -145,6 +146,41 @@ export class BlockchainService {
     return 'confirmed';
   }
 
+  /**
+   * Bind a community to an on-chain authority, once and for all.
+   *
+   * This is the first write for any community and the one every later write
+   * depends on: `create_permission` and `record_governance_decision` both check
+   * the signer against `community.authority`, which is set here. Until it lands,
+   * those instructions fail with NotCommunityAuthority — the chain is not
+   * partially live, it is entirely not live for that community.
+   *
+   * The authority passed is the configured signer, so the community is bound to
+   * whatever key SOLANA_KEYPAIR_PATH holds. That is a real limitation and not a
+   * shortcut: one keypair means one anchored community. The program deliberately
+   * refuses to re-point a community at a different authority, so re-keying means
+   * a new community id.
+   */
+  async recordCommunityInitialized(input: {
+    communityId: string;
+    name: string;
+  }): Promise<string | null> {
+    if (!this.isEnabled()) {
+      this.skip('initialize_community');
+      return null;
+    }
+
+    return this.write('initialize_community', input.communityId, (client) =>
+      client.initializeCommunity({
+        communityId: input.communityId,
+        authority: client.authority,
+        // The name is hashed, never written. It is mutable off-chain, and a
+        // community renaming itself must not require a new ruleset.
+        nameHash: sha256Utf8(input.name),
+      }),
+    );
+  }
+
   async recordPermissionCreated(input: {
     communityId: string;
     permissionId: string;
@@ -159,8 +195,8 @@ export class BlockchainService {
       return null;
     }
 
-    return this.write('create_permission', input.permissionId, () =>
-      this.getClient().createPermission({
+    return this.write('create_permission', input.permissionId, (client) =>
+      client.createPermission({
         communityId: input.communityId,
         permissionId: input.permissionId,
         grantee: new PublicKey(input.granteeWallet),
@@ -183,8 +219,8 @@ export class BlockchainService {
       return null;
     }
 
-    return this.write('revoke_permission', input.permissionId, () =>
-      this.getClient().revokePermission({
+    return this.write('revoke_permission', input.permissionId, (client) =>
+      client.revokePermission({
         communityId: input.communityId,
         permissionId: input.permissionId,
         policyHash: input.policyHash,
@@ -204,8 +240,8 @@ export class BlockchainService {
       return null;
     }
 
-    return this.write('record_governance_decision', input.decisionId, () =>
-      this.getClient().recordGovernanceDecision({
+    return this.write('record_governance_decision', input.decisionId, (client) =>
+      client.recordGovernanceDecision({
         communityId: input.communityId,
         eventId: input.decisionId,
         decisionHash: this.hashService.hashCanonical(input.decisionPayload),
@@ -218,17 +254,22 @@ export class BlockchainService {
    * Perform a chain write, converting every failure into a non-fatal result.
    *
    * Never throws: an unreachable RPC must not roll back a governance decision
-   * that the community has already made. The error is logged with its message
-   * so an operator can tell "RPC unreachable" from "program rejected this",
-   * which are very different problems.
+   * that the community has already made, and a malformed keypair must not turn
+   * an already-committed community creation into a 500. The error is logged with
+   * its message so an operator can tell "RPC unreachable" from "program rejected
+   * this", which are very different problems.
+   *
+   * The client is acquired *inside* the try, and handed to the callback, because
+   * constructing it reads the keypair from disk and can throw on its own. Hoisting
+   * it out would leave exactly one failure path able to escape this method.
    */
   private async write(
     instruction: string,
     entityId: string,
-    send: () => Promise<string>,
+    send: (client: GovernanceAnchorClient) => Promise<string>,
   ): Promise<string | null> {
     try {
-      const signature = await send();
+      const signature = await send(this.getClient());
       this.logger.log(
         `${instruction} recorded on Solana for ${entityId}: ${signature}`,
       );

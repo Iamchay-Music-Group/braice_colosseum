@@ -1,0 +1,74 @@
+# The Docker build context is the repository root (see Dockerfile), so this file
+# decides what reaches the daemon. It is a size and safety boundary, not a
+# substitute for .gitignore: `.dockerignore` also has to exclude things that ARE
+# tracked in git, such as .env.example and .github/.
+
+# ── Version control and CI ───────────────────────────────────────────────────
+# Nothing here is an input to the image. In particular .github/ carries the
+# workflow that builds this image: leaving it in context would let the build
+# consume the definition of itself.
+.git
+.gitignore
+.github
+.gitattributes
+.kilo
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+# Recreated inside the image by `pnpm install --frozen-lockfile`. Copying the
+# host's node_modules in would also copy the host's platform and would defeat
+# the lockfile.
+node_modules
+**/node_modules
+.pnpm-store
+**/.pnpm-store
+
+# ── Build output ─────────────────────────────────────────────────────────────
+# Stale local `dist/` directories would shadow the fresh build (nest-cli.json
+# sets deleteOutDir, but only for apps/api) and would be baked into the image
+# if the build failed partway.
+dist
+**/dist
+build
+**/build
+*.tsbuildinfo
+
+# ── Test artifacts ───────────────────────────────────────────────────────────
+coverage
+**/coverage
+.nyc_output
+**/.nyc_output
+test-ledger
+**/test-ledger
+
+# ── Solana build output ──────────────────────────────────────────────────────
+# ~1.4 GB of Rust target/. anchor build is a separate CI job; the API image
+# talks to Solana over RPC and has no reason to carry a compiler.
+programs/braice-governance/target
+programs/braice-governance/.anchor
+programs/braice-governance/tests
+
+# ── Secrets and local configuration ──────────────────────────────────────────
+# Every file matching .env* is excluded, including .env.example. This is the
+# single most important rule here: apps/api resolves its config from
+# `../../../../.env` at boot, so a .env copied into a layer would be read by
+# the container and would survive in the image forever, readable by anyone who
+# can pull it.
+.env
+**/.env
+.env.*
+**/.env.*
+*.pem
+**/*.pem
+*.key
+**/*.key
+# Solana wallet material. `keypair.json` is what solana-keygen writes and
+# SOLANA_KEYPAIR_PATH points at one; it must never enter a layer.
+**/id.json
+**/*-keypair.json
+
+# ── Editor, OS and log noise ─────────────────────────────────────────────────
+.vscode
+.idea
+**/*.log
+.DS_Store
+Thumbs.db

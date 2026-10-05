@@ -48,4 +48,35 @@ pub enum GovernanceError {
 
     #[msg("The signing authority does not match the authority the community was initialized with")]
     AuthorityMismatch,
+
+    // --- Ruleset errors. Appended after the permission errors above. ---
+    //
+    // Never insert above this line: codes are positional (6000 + index), so a
+    // new variant in the middle renumbers everything after it and silently
+    // breaks every client that already maps the old numbers.
+
+    #[msg("This community already has a ruleset; only initialize once")]
+    RulesetAlreadyInitialized,
+    #[msg("Ruleset version must be exactly one more than the version in force")]
+    RulesetVersionNotSequential,
+    #[msg("Genesis ruleset must declare no predecessor")]
+    RulesetHasPredecessor,
+    #[msg("Non-genesis ruleset must name the version currently in force as its predecessor")]
+    RulesetPredecessorMismatch,
+    #[msg("threshold_bps and quorum_bps must be between 1 and 10000 basis points")]
+    ThresholdOutOfRange,
+    #[msg("quorum_bps cannot exceed threshold_bps")]
+    QuorumAboveThreshold,
+    #[msg("Governance has already moved from creator control to shared governance")]
+    AlreadyHandedOver,
+    #[msg("Handover requires the active member count to reach the creator's threshold")]
+    HandoverThresholdNotMet,
+    #[msg("Active member count would go negative")]
+    MemberCountUnderflow,
+    #[msg("This community has no ruleset in force")]
+    NoActiveRuleset,
+    #[msg("Ruleset version was already activated and cannot be activated again")]
+    RulesetAlreadyActivated,
+    #[msg("Not enough distinct approvals to meet the threshold under shared governance")]
+    InsufficientApprovals,
 }

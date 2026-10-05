@@ -44,7 +44,10 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   const port = process.env.PORT || 3001;
-  await app.listen(port);
+  // Bind explicitly rather than letting the server default. In a container the
+  // interface has to be reachable from outside the network namespace the ECS
+  // task runs in, and saying so is clearer than relying on the Node default.
+  await app.listen(port, '0.0.0.0');
   console.log(`BRAICE API running on http://localhost:${port}/api`);
   console.log(`Swagger docs at http://localhost:${port}/docs`);
 }

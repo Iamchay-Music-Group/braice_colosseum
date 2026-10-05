@@ -7,6 +7,7 @@ import { Community } from './entities/community.entity';
 import { Membership } from '../memberships/entities/membership.entity';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { ApprovalMode } from '../governance/entities/governance-decision.entity';
+import { BlockchainService } from '../blockchain/blockchain.service';
 
 type MockRepo<T extends ObjectLiteral = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -41,15 +42,21 @@ describe('CommunitiesService', () => {
     manager: { transaction: jest.Mock };
   };
   let tx: ReturnType<typeof mockManager>;
+  let blockchain: { recordCommunityInitialized: jest.Mock };
 
   beforeEach(async () => {
     tx = mockManager();
     repo = { ...mockRepo(), manager: { transaction: tx.transaction } };
+    // create() anchors the community after the transaction commits, so this is
+    // exercised on the happy path. It resolves null (anchoring off) so the
+    // existing assertions on the return value are unaffected.
+    blockchain = { recordCommunityInitialized: jest.fn().mockResolvedValue(null) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommunitiesService,
         { provide: getRepositoryToken(Community), useValue: repo },
+        { provide: BlockchainService, useValue: blockchain },
       ],
     }).compile();
 
@@ -79,6 +86,65 @@ describe('CommunitiesService', () => {
         operatorId: 'operator-uuid',
         governanceConfig: dto.governanceConfig,
       });
+    });
+
+    it('anchors the community on-chain with its id and name', async () => {
+      const dto: CreateCommunityDto = {
+        name: 'Afrobeat Creators',
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_AND_THRESHOLD, thresholdPercentage: 60 },
+      };
+
+      tx.managerSpies.create.mockImplementation((_e: unknown, data: unknown) => ({ ...(data as object), id: 'comm-1' }));
+
+      await service.create(dto, 'operator-uuid');
+
+      // The name is passed through, not the hash: hashing is the client's job,
+      // and the service has no business choosing what is hashed on-chain.
+      expect(blockchain.recordCommunityInitialized).toHaveBeenCalledWith({
+        communityId: 'comm-1',
+        name: 'Afrobeat Creators',
+      });
+    });
+
+    it('anchors only after the transaction has committed', async () => {
+      const dto: CreateCommunityDto = {
+        name: 'Afrobeat Creators',
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_ONLY, thresholdPercentage: 0 },
+      };
+
+      tx.managerSpies.create.mockImplementation((_e: unknown, data: unknown) => ({ ...(data as object), id: 'comm-7' }));
+
+      // The ordering is the property under test: the anchor is an RPC round trip
+      // and must never be awaited inside a Postgres transaction, or an
+      // unreachable validator would hold a transaction open and abort a
+      // community creation that has no on-chain dependency.
+      let committed = false;
+      tx.transaction.mockImplementation(async (cb: (m: typeof tx.managerSpies) => Promise<unknown>) => {
+        const out = await cb(tx.managerSpies);
+        committed = true;
+        return out;
+      });
+
+      await service.create(dto, 'operator-uuid');
+
+      expect(committed).toBe(true);
+      expect(blockchain.recordCommunityInitialized).toHaveBeenCalled();
+    });
+
+    it('still returns the community when anchoring fails', async () => {
+      const dto: CreateCommunityDto = {
+        name: 'Afrobeat Creators',
+        governanceConfig: { approvalMode: ApprovalMode.CREATOR_ONLY, thresholdPercentage: 0 },
+      };
+      const saved = { id: 'comm-1', name: 'Afrobeat Creators', description: null, operatorId: 'operator-uuid', governanceConfig: dto.governanceConfig };
+
+      tx.managerSpies.create.mockImplementation((_e: unknown, data: unknown) => ({ ...(data as object), id: 'comm-1' }));
+      // Belt and braces: BlockchainService is documented never to throw, so a
+      // rejection here would mean a bug upstream. The community must still be
+      // returned regardless, because it is already committed to Postgres.
+      blockchain.recordCommunityInitialized.mockRejectedValue(new Error('rpc unreachable'));
+
+      await expect(service.create(dto, 'operator-uuid')).resolves.toEqual(saved);
     });
 
     it('enrols the operator as an ACTIVE OPERATOR member', async () => {

@@ -19,17 +19,29 @@
 const assert = require('node:assert/strict');
 const {
   ACCOUNT_DISCRIMINATOR,
+  ACCOUNT_SIZE,
   AnchoredPermissionStatus,
   BorshReader,
   DecisionOutcome,
+  GOVERNANCE_ERROR,
   GovernanceAnchorClient,
-  decodePermissionState,
-  deriveOnChainId,
+  RuleMode,
+  activeRulesPda,
+  buildActivateRuleset,
+  buildHandoverToSharedGovernance,
+  buildInitializeRuleset,
+  buildProposeRuleset,
+  buildRecordMembershipDelta,
   communityPda,
+  decodeActiveRules,
+  decodePermissionState,
+  decodeRuleSet,
+  deriveOnChainId,
   eventPda,
   extractProgramErrorCode,
   loadKeypair,
   permissionPda,
+  ruleSetPda,
 } = require('@braice/blockchain-client');
 const { Connection, Keypair, PublicKey, Transaction } = require('@solana/web3.js');
 
@@ -38,9 +50,16 @@ const PROGRAM_ID = process.env.SOLANA_PROGRAM_ID || '5kd7y5YMtwCEggyHQahFFgmS4Ce
 const KEYPAIR_PATH =
   process.env.SOLANA_KEYPAIR_PATH || `${process.env.HOME}/.config/solana/id.json`;
 
-const COMMUNITY_ID = 'itest-community-1';
-const PERMISSION_ID = 'itest-permission-1';
-const RESOURCE_ID = 'itest-dataset-1';
+// Every account this suite creates is `init`-only, so a second run against the
+// same validator would collide with the first run's state and produce failures
+// that look like program bugs. Scoping the ids to this process keeps the suite
+// re-runnable without resetting the ledger, which is what makes it usable in a
+// loop while iterating on either half.
+const RUN_ID = require('node:crypto').randomBytes(4).toString('hex');
+
+const COMMUNITY_ID = `itest-community-${RUN_ID}`;
+const PERMISSION_ID = `itest-permission-${RUN_ID}`;
+const RESOURCE_ID = `itest-dataset-${RUN_ID}`;
 const PURPOSE = 'campaign_planning';
 
 const results = [];
@@ -119,7 +138,7 @@ async function main() {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const policyHash = 'b'.repeat(64);
   const decisionHash = 'c'.repeat(64);
-  const decisionId = 'itest-decision-1';
+  const decisionId = `itest-decision-${RUN_ID}`;
 
   console.log(`\nBRAICE governance integration test`);
   console.log(`  program   ${PROGRAM_ID}`);
@@ -338,7 +357,7 @@ async function main() {
       () =>
         client.createPermission({
           communityId: COMMUNITY_ID,
-          permissionId: 'itest-expired',
+          permissionId: `itest-expired-${RUN_ID}`,
           grantee,
           purpose: PURPOSE,
           resourceId: RESOURCE_ID,
@@ -393,7 +412,7 @@ async function main() {
       impostor.publicKey, // claims to be the authority, and is not
       {
         communityId: COMMUNITY_ID,
-        permissionId: 'itest-unauthorized',
+        permissionId: `itest-unauthorized-${RUN_ID}`,
         grantee,
         purpose: PURPOSE,
         resourceId: RESOURCE_ID,
@@ -484,6 +503,498 @@ async function main() {
     const account = await connection.getAccountInfo(address);
     const decoded = decodePermissionState(Buffer.from(account.data));
     assert.equal(decoded.status, AnchoredPermissionStatus.Revoked);
+  });
+
+  // ======================================================================
+  // Ruleset versioning and handover.
+  //
+  // The whole point of the ruleset is that the live version changes only
+  // through `activate_ruleset`, that the history cannot be forked or skipped,
+  // and that handover happens when the creator's own threshold is reached even
+  // if the creator never volunteers. None of that is provable from host-side
+  // tests: it lives in Anchor's account constraints and in the System Program's
+  // allocation, so it has to be exercised against a running validator.
+  // ======================================================================
+
+  const programId = new PublicKey(PROGRAM_ID);
+  const connection = new Connection(RPC_URL, 'confirmed');
+  const rulesHash = 'd'.repeat(64);
+  const versionHash = 'e'.repeat(64);
+
+  /**
+   * Bind a throwaway community so its ruleset checks can run.
+   *
+   * Necessary because Anchor validates accounts in declaration order before the
+   * handler body runs: a ruleset check against a community that was never
+   * initialized fails as `AccountNotInitialized` (3012) and never reaches the
+   * validation it was written to exercise. Each negative check below needs its
+   * own community, since a valid genesis permanently occupies version 1.
+   */
+  async function initCommunity(suffix) {
+    const communityId = `${COMMUNITY_ID}-${suffix}`;
+    await client.initializeCommunity({
+      communityId,
+      authority: authority.publicKey,
+      nameHash: new Uint8Array(32).fill(11),
+    });
+    return communityId;
+  }
+
+  // Approver keys, funded so a missing-signature failure cannot be confused
+  // with a fee failure. These stand in for community members whose keys approve
+  // a rule change.
+  const approvers = [Keypair.generate(), Keypair.generate()];
+  for (const approver of approvers) {
+    const signature = await connection.requestAirdrop(approver.publicKey, 1_000_000_000);
+    const latest = await connection.getLatestBlockhash('confirmed');
+    await connection.confirmTransaction({ signature, ...latest }, 'confirmed');
+  }
+
+  /**
+   * Build, sign and send an activation with an arbitrary signer set.
+   *
+   * The client's own `activateRuleset` can only produce its key's signature, so
+   * the multi-signer path has to be assembled here. Using the same exported
+   * builder keeps the account order and encoding under test rather than
+   * duplicating them.
+   */
+  async function activateWithSigners(communityId, version, signers) {
+    const ix = buildActivateRuleset(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      { communityId, version },
+      signers.map((k) => k.publicKey),
+    );
+    const tx = new Transaction().add(ix);
+    tx.feePayer = authority.publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority, ...signers);
+    return { tx, signers: [authority, ...signers] };
+  }
+
+  console.log('\nruleset genesis');
+
+  await check('anchors a genesis ruleset and makes version 1 live', async () => {
+    const signature = await client.initializeRuleset({
+      communityId: COMMUNITY_ID,
+      version: 1,
+      rulesHash,
+      thresholdBps: 5000,
+      quorumBps: 2500,
+      minActiveMembers: 3,
+    });
+    assert.match(signature, /^[1-9A-HJ-NP-Za-km-z]{80,90}$/);
+
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.ok(active, 'the live ruleset pointer must exist after genesis');
+    assert.equal(active.version, 1);
+    // The creator is the first active member, so handover is measured from 1.
+    assert.equal(active.activeMemberCount, 1);
+    assert.equal(active.mode, RuleMode.CreatorControl);
+    assert.equal(active.handedOverAt, 0);
+
+    const genesis = await client.fetchRuleSet(COMMUNITY_ID, 1);
+    assert.ok(genesis);
+    assert.equal(genesis.previousVersion, 0);
+    assert.equal(genesis.thresholdBps, 5000);
+    assert.equal(genesis.minActiveMembers, 3);
+    assert.notEqual(genesis.activatedAt, 0, 'genesis is live immediately');
+  });
+
+  await check('refuses a second genesis ruleset', async () => {
+    // The System Program rejects the allocation before the handler body runs, so
+    // there is no custom code to assert - only that the original survives.
+    await expectRejected(() =>
+      client.initializeRuleset({
+        communityId: COMMUNITY_ID,
+        version: 1,
+        rulesHash,
+        thresholdBps: 5000,
+        quorumBps: 2500,
+        minActiveMembers: 3,
+      }),
+    );
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.version, 1, 'the live version must be unchanged');
+  });
+
+  await check('refuses a genesis that is not version 1', async () => {
+    const ix = buildInitializeRuleset(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      {
+        communityId: await initCommunity('v2-genesis'),
+        version: 2,
+        rulesHash,
+        thresholdBps: 5000,
+        quorumBps: 2500,
+        minActiveMembers: 3,
+      },
+    );
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.RulesetVersionNotSequential,
+      `expected RulesetVersionNotSequential, got ${code}`,
+    );
+  });
+
+  await check('refuses a threshold of 0, which one signature would always satisfy', async () => {
+    const ix = buildInitializeRuleset(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      {
+        communityId: await initCommunity('zero-threshold'),
+        version: 1,
+        rulesHash,
+        thresholdBps: 0,
+        quorumBps: 0,
+        minActiveMembers: 0,
+      },
+    );
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.ThresholdOutOfRange,
+      `expected ThresholdOutOfRange, got ${code}`,
+    );
+  });
+
+  await check('refuses a quorum above the threshold', async () => {
+    const ix = buildInitializeRuleset(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      {
+        communityId: await initCommunity('bad-quorum'),
+        version: 1,
+        rulesHash,
+        thresholdBps: 3000,
+        quorumBps: 6000,
+        minActiveMembers: 0,
+      },
+    );
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.QuorumAboveThreshold,
+      `expected QuorumAboveThreshold, got ${code}`,
+    );
+  });
+
+  await check('refuses a membership delta that would go negative', async () => {
+    const ix = buildRecordMembershipDelta(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      { communityId: COMMUNITY_ID, delta: -5 },
+    );
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.MemberCountUnderflow,
+      `expected MemberCountUnderflow, got ${code}`,
+    );
+
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.activeMemberCount, 1, 'the count must be left alone');
+  });
+
+  await check('refuses a membership report from a non-authority', async () => {
+    const ix = buildRecordMembershipDelta(
+      programId,
+      impostor.publicKey,
+      impostor.publicKey,
+      { communityId: COMMUNITY_ID, delta: 1 },
+    );
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(impostor);
+    const code = await simulateForProgramError(connection, tx, [impostor]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.NotCommunityAuthority,
+      `expected NotCommunityAuthority, got ${code}`,
+    );
+  });
+
+  await check('refuses to activate a version that skips the live one', async () => {
+    const ix = buildProposeRuleset(programId, authority.publicKey, authority.publicKey, {
+      communityId: COMMUNITY_ID,
+      version: 3,
+      rulesHash: versionHash,
+      thresholdBps: 5000,
+      quorumBps: 2500,
+      minActiveMembers: 3,
+    });
+    const tx = new Transaction().add(ix);
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.RulesetVersionNotSequential,
+      `expected RulesetVersionNotSequential, got ${code}`,
+    );
+  });
+
+  console.log('\nruleset versioning');
+
+  await check('a proposed version exists without becoming live', async () => {
+    await client.proposeRuleset({
+      communityId: COMMUNITY_ID,
+      version: 2,
+      rulesHash: versionHash,
+      thresholdBps: 5000,
+      quorumBps: 2500,
+      minActiveMembers: 3,
+    });
+
+    const proposed = await client.fetchRuleSet(COMMUNITY_ID, 2);
+    assert.ok(proposed, 'the version account must exist');
+    assert.equal(proposed.previousVersion, 1, 'it must chain to the live version');
+    assert.equal(proposed.activatedAt, 0, 'proposing must not activate');
+
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.version, 1, 'the live version must not move on propose');
+  });
+
+  await check('the creator alone can activate under creator control', async () => {
+    await client.activateRuleset({ communityId: COMMUNITY_ID, version: 2 });
+
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.version, 2);
+    assert.equal(active.mode, RuleMode.CreatorControl);
+    assert.notEqual(active.activatedAt, 0);
+
+    const live = await client.fetchRuleSet(COMMUNITY_ID, 2);
+    assert.notEqual(live.activatedAt, 0, 'activation must be recorded on the version');
+  });
+
+  await check('refuses to activate the same version twice', async () => {
+    const { tx, signers } = await activateWithSigners(COMMUNITY_ID, 2, []);
+    const code = await simulateForProgramError(connection, tx, signers);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.RulesetAlreadyActivated,
+      `expected RulesetAlreadyActivated, got ${code}`,
+    );
+  });
+
+  await check('refuses handover measured against a version that is not live', async () => {
+    const ix = buildHandoverToSharedGovernance(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      { communityId: COMMUNITY_ID, version: 1 },
+    );
+    const tx = new Transaction().add(ix);
+    tx.feePayer = authority.publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.RulesetPredecessorMismatch,
+      `expected RulesetPredecessorMismatch, got ${code}`,
+    );
+  });
+
+  console.log('\nhandover');
+
+  await check('refuses handover before min_active_members is reached', async () => {
+    // A separate community so the main one stays mid-lifecycle.
+    const other = await initCommunity('early');
+    await client.initializeRuleset({
+      communityId: other,
+      version: 1,
+      rulesHash,
+      thresholdBps: 5000,
+      quorumBps: 2500,
+      minActiveMembers: 5,
+    });
+
+    const ix = buildHandoverToSharedGovernance(
+      programId,
+      authority.publicKey,
+      authority.publicKey,
+      { communityId: other, version: 1 },
+    );
+    const tx = new Transaction().add(ix);
+    tx.feePayer = authority.publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(authority);
+    const code = await simulateForProgramError(connection, tx, [authority]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.HandoverThresholdNotMet,
+      `expected HandoverThresholdNotMet, got ${code}`,
+    );
+  });
+
+  await check('hands over once the member count reaches the creator threshold', async () => {
+    // 1 (creator) + 3 = 4, and min_active_members is 3.
+    await client.recordMembershipDelta({ communityId: COMMUNITY_ID, delta: 3 });
+
+    let active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.activeMemberCount, 4);
+    assert.equal(active.mode, RuleMode.CreatorControl, 'a count alone must not hand over');
+
+    await client.handoverToSharedGovernance({ communityId: COMMUNITY_ID, version: 2 });
+
+    active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.mode, RuleMode.SharedGovernance);
+    assert.notEqual(active.handedOverAt, 0, 'handover must leave a permanent receipt');
+  });
+
+  await check('refuses a second handover', async () => {
+    // The transition is one-way; a replay must be an error, not a silent no-op.
+    await expectProgramError(
+      () => client.handoverToSharedGovernance({ communityId: COMMUNITY_ID, version: 2 }),
+      GOVERNANCE_ERROR.AlreadyHandedOver,
+    );
+  });
+
+  await check('refuses a rule change under shared governance without enough approvals', async () => {
+    await client.proposeRuleset({
+      communityId: COMMUNITY_ID,
+      version: 3,
+      rulesHash,
+      thresholdBps: 5000,
+      quorumBps: 2500,
+      minActiveMembers: 3,
+    });
+
+    // 4 members at 50% needs 2 distinct signers. Only the authority signs here.
+    const { tx, signers } = await activateWithSigners(COMMUNITY_ID, 3, []);
+    const code = await simulateForProgramError(connection, tx, signers);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.InsufficientApprovals,
+      `expected InsufficientApprovals, got ${code}`,
+    );
+
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.version, 2, 'a rejected activation must not move the rules');
+  });
+
+  await check('refuses a duplicate approval instead of counting it twice', async () => {
+    // The same key repeated must not clear a threshold: with 4 members at 50% the
+    // authority alone is one signer, and repeating it is still one signer.
+    const { tx, signers } = await activateWithSigners(COMMUNITY_ID, 3, [authority]);
+    const code = await simulateForProgramError(connection, tx, signers);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.InsufficientApprovals,
+      `expected InsufficientApprovals, got ${code}`,
+    );
+  });
+
+  await check('accepts a rule change once the threshold signatures are present', async () => {
+    const { tx, signers } = await activateWithSigners(COMMUNITY_ID, 3, [approvers[0]]);
+
+    // web3.js 1.x has no sendAndConfirmTransaction; signing is done by hand in
+    // activateWithSigners, so send the serialized transaction and confirm it.
+    const signature = await connection.sendRawTransaction(tx.serialize(), {
+      skipPreflight: false,
+      preflightCommitment: 'confirmed',
+    });
+    const latest = await connection.getLatestBlockhash('confirmed');
+    const confirmation = await connection.confirmTransaction(
+      { signature, ...latest },
+      'confirmed',
+    );
+    assert.equal(
+      confirmation.value.err,
+      null,
+      `activation failed: ${JSON.stringify(confirmation.value.err)}`,
+    );
+    assert.equal(signers.length, 2, 'the authority and one approver must both sign');
+    assert.match(signature, /^[1-9A-HJ-NP-Za-km-z]{80,90}$/);
+
+    const active = await client.fetchActiveRules(COMMUNITY_ID);
+    assert.equal(active.version, 3, 'the approved version must be live');
+    assert.equal(active.mode, RuleMode.SharedGovernance, 'handover must persist');
+  });
+
+  await check('a RuleSet account is exactly the size the program allocated', async () => {
+    const [address] = ruleSetPda(programId, COMMUNITY_ID, 3);
+    const account = await connection.getAccountInfo(address);
+    assert.equal(
+      account.data.length,
+      ACCOUNT_SIZE.ruleSet,
+      'account size drifted from the space constant',
+    );
+  });
+
+  await check('an ActiveRules account is exactly the size the program allocated', async () => {
+    const [address] = activeRulesPda(programId, COMMUNITY_ID);
+    const account = await connection.getAccountInfo(address);
+    assert.equal(
+      account.data.length,
+      ACCOUNT_SIZE.activeRules,
+      'account size drifted from the space constant',
+    );
+  });
+
+  await check('raw RuleSet bytes round-trip through the client decoder', async () => {
+    const [address] = ruleSetPda(programId, COMMUNITY_ID, 3);
+    const account = await connection.getAccountInfo(address);
+    const decoded = decodeRuleSet(Buffer.from(account.data));
+    assert.equal(decoded.version, 3);
+    assert.equal(decoded.previousVersion, 2);
+    assert.equal(decoded.mode, RuleMode.SharedGovernance);
+    assert.deepEqual(
+      decoded.rulesHash,
+      Uint8Array.from(Buffer.from(rulesHash, 'hex')),
+      'the rules hash must survive the round trip unchanged',
+    );
+  });
+
+  await check('raw ActiveRules bytes round-trip through the client decoder', async () => {
+    const [address] = activeRulesPda(programId, COMMUNITY_ID);
+    const account = await connection.getAccountInfo(address);
+    const decoded = decodeActiveRules(Buffer.from(account.data));
+    assert.equal(decoded.version, 3);
+    assert.equal(decoded.activeMemberCount, 4);
+    assert.equal(decoded.mode, RuleMode.SharedGovernance);
+    assert.notEqual(decoded.handedOverAt, 0);
+  });
+
+  await check('a non-authority cannot propose a new version', async () => {
+    const ix = buildProposeRuleset(programId, impostor.publicKey, impostor.publicKey, {
+      communityId: COMMUNITY_ID,
+      version: 4,
+      rulesHash,
+      thresholdBps: 5000,
+      quorumBps: 2500,
+      minActiveMembers: 3,
+    });
+    const tx = new Transaction().add(ix);
+    tx.feePayer = impostor.publicKey;
+    tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+    tx.sign(impostor);
+    const code = await simulateForProgramError(connection, tx, [impostor]);
+    assert.equal(
+      code,
+      GOVERNANCE_ERROR.NotCommunityAuthority,
+      `expected NotCommunityAuthority, got ${code}`,
+    );
   });
 
   const failed = results.filter((r) => !r.ok);

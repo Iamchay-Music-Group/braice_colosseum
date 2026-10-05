@@ -1,9 +1,19 @@
+pub mod activate_ruleset;
 pub mod create_permission;
+pub mod handover_to_shared_governance;
 pub mod initialize_community;
+pub mod initialize_ruleset;
+pub mod propose_ruleset;
 pub mod record_governance_decision;
+pub mod record_membership_delta;
 pub mod revoke_permission;
 
+pub use activate_ruleset::*;
 pub use create_permission::*;
+pub use handover_to_shared_governance::*;
 pub use initialize_community::*;
+pub use initialize_ruleset::*;
+pub use propose_ruleset::*;
 pub use record_governance_decision::*;
+pub use record_membership_delta::*;
 pub use revoke_permission::*;

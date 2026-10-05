@@ -9,6 +9,9 @@ import { CommunitiesService } from './communities.service';
 import { CommunitiesController } from './communities.controller';
 import { MembershipsModule } from '../memberships/memberships.module';
 import { AuthModule } from '../auth/auth.module';
+// For the post-commit initialize_community anchor. Not for anything on the
+// authorization path, and it is not required for the module to boot.
+import { BlockchainModule } from '../blockchain/blockchain.module';
 
 @Module({
   imports: [
@@ -16,6 +19,7 @@ import { AuthModule } from '../auth/auth.module';
     MembershipsModule,
     // AuthModule exports JwtAuthGuard, which guards the controller.
     AuthModule,
+    BlockchainModule,
   ],
   controllers: [CommunitiesController],
   providers: [CommunitiesService],

@@ -18,6 +18,15 @@ export const INSTRUCTION_DISCRIMINATOR = {
   recordGovernanceDecision: Buffer.from([
     0x2e, 0x88, 0x01, 0x92, 0x17, 0x55, 0xca, 0x75,
   ]),
+  initializeRuleset: Buffer.from([0x8c, 0x85, 0xad, 0x50, 0x0b, 0x58, 0xcb, 0x10]),
+  proposeRuleset: Buffer.from([0x0e, 0xa2, 0x7a, 0xa9, 0xdf, 0x8c, 0x09, 0x24]),
+  activateRuleset: Buffer.from([0x4a, 0x37, 0x57, 0x6f, 0x2c, 0xed, 0xfa, 0x67]),
+  recordMembershipDelta: Buffer.from([
+    0x27, 0x83, 0x34, 0x20, 0xe1, 0x20, 0x5d, 0x36,
+  ]),
+  handoverToSharedGovernance: Buffer.from([
+    0xc4, 0x2d, 0x48, 0x71, 0x1f, 0x98, 0x11, 0x9d,
+  ]),
 } as const;
 
 /** Account discriminators, used when decoding fetched accounts. */
@@ -25,6 +34,8 @@ export const ACCOUNT_DISCRIMINATOR = {
   communityState: Buffer.from([0x85, 0x42, 0x39, 0xeb, 0xdb, 0x94, 0x68, 0xe6]),
   permissionState: Buffer.from([0x16, 0xb7, 0x75, 0x41, 0x78, 0xc9, 0xb9, 0xec]),
   governanceEvent: Buffer.from([0x68, 0x80, 0x5f, 0x52, 0x12, 0x2c, 0x29, 0x18]),
+  ruleSet: Buffer.from([0x39, 0x42, 0xcc, 0x80, 0x6a, 0x97, 0xaa, 0xf3]),
+  activeRules: Buffer.from([0xfe, 0xeb, 0x5c, 0x5e, 0x46, 0x98, 0x55, 0x38]),
 } as const;
 
 /**
@@ -38,7 +49,42 @@ export const SEED = {
   community: Buffer.from('community', 'utf8'),
   permission: Buffer.from('permission', 'utf8'),
   event: Buffer.from('event', 'utf8'),
+  ruleset: Buffer.from('ruleset', 'utf8'),
+  activeRules: Buffer.from('active_rules', 'utf8'),
 } as const;
+
+/**
+ * Account sizes in bytes, including the 8-byte Anchor discriminator.
+ *
+ * Mirrors `constants::space` in Rust, field by field. A `fetch` that asked for
+ * the wrong length would silently return a buffer that decodes to shifted
+ * fields, so the decoder checks the exact size rather than parsing whatever it
+ * was handed. The Rust side asserts the same arithmetic in its own test suite.
+ */
+export const ACCOUNT_SIZE = {
+  // 8 + 32 (community_id) + 32 (authority) + 32 (name_hash)
+  //   + 8 (permission_count) + 8 (decision_count) + 8 (created_at) + 1 (bump)
+  communityState: 8 + 32 + 32 + 32 + 8 + 8 + 8 + 1,
+  // 8 + 32 (permission_id) + 32 (community_id) + 32 (grantee)
+  //   + 32 (purpose_hash) + 32 (resource_hash) + 32 (policy_hash)
+  //   + 8 (issued_at) + 8 (expires_at) + 8 (revoked_at) + 1 (status) + 1 (bump)
+  permissionState:
+    8 + 32 + 32 + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 1 + 1,
+  // 8 + 32 (event_id) + 32 (community_id) + 32 (decision_hash)
+  //   + 8 (decided_at) + 1 (outcome) + 1 (bump)
+  governanceEvent: 8 + 32 + 32 + 32 + 8 + 1 + 1,
+  // 8 + 32 (community_id) + 4 (version) + 1 (mode) + 2 (threshold_bps)
+  //   + 2 (quorum_bps) + 4 (min_active_members) + 32 (rules_hash)
+  //   + 4 (previous_version) + 8 (created_at) + 8 (activated_at) + 1 (bump)
+  ruleSet:
+    8 + 32 + 4 + 1 + 2 + 2 + 4 + 32 + 4 + 8 + 8 + 1,
+  // 8 + 32 (community_id) + 4 (version) + 1 (mode) + 4 (active_member_count)
+  //   + 8 (activated_at) + 8 (handed_over_at) + 1 (bump)
+  activeRules: 8 + 32 + 4 + 1 + 4 + 8 + 8 + 1,
+} as const;
+
+/** Basis points: 100% is `BASIS_POINTS_MAX`, matching Rust's MAX_THRESHOLD_BPS. */
+export const BASIS_POINTS_MAX = 10000;
 
 /**
  * Namespace for deriving 32-byte on-chain ids from off-chain string ids.
