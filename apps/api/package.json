@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "BRAICE API - NestJS Backend",
+  "//engines": "Matches the root package.json and the Dockerfile's node:24 base, and is what Vercel reads when the project Root Directory is apps/api. Stated here as well so the function runtime does not silently drift from the version the image is built on.",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "prebuild": "rimraf dist",
     "build": "nest build",

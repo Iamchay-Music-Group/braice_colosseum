@@ -1,47 +1,11 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { configureApp } from './app.setup';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-
-  app.setGlobalPrefix('api');
-
-  app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    credentials: true,
-  });
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-
-  const config = new DocumentBuilder()
-    .setTitle('BRAICE API')
-    .setDescription('Community Governance Permission Infrastructure')
-    .setVersion('0.1.0')
-    .addTag('Auth', 'Email + password sign-in, and optional Solana wallet linking')
-    .addTag('Users', 'Read-only user directory (no self-assigned roles)')
-    .addTag('Communities', 'Community CRUD and governance config')
-    .addTag('Memberships', 'Self-service join and leave; operator-only removal')
-    .addTag(
-      'Activity',
-      'Individual activity ingestion (operator only). There is no route that ' +
-        'returns an individual record; only a count.',
-    )
-    .addTag('Access Requests', 'Permission proposals awaiting governance')
-    .addTag('Datasets', 'Community-level aggregates. Governed reads.')
-    .addTag('AI', 'Permission-checked analysis of community intelligence')
-    .addTag('Audit', 'Decision trail, read by operators and grantees')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+  // configureApp applies the global prefix, CORS, validation and Swagger — the
+  // same set the Vercel entry point applies (see app.setup.ts).
+  const app = configureApp(await NestFactory.create(AppModule));
 
   const port = process.env.PORT || 3001;
   // Bind explicitly rather than letting the server default. In a container the
