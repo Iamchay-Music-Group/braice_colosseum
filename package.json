@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api dev",
-    "build": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api build --output public",
+    "build": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api build",
     "start": "pnpm --filter @braice/api start:prod",
     "test": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api test",
     "test:cov": "pnpm build:engine && pnpm build:client && pnpm build:ai && pnpm --filter @braice/api test:cov",

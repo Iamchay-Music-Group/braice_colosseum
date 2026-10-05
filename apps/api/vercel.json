@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "cd .. && corepack enable && pnpm install --frozen-lockfile",
-  "buildCommand": "cd .. && pnpm build",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm -w run build",
   "functions": {
     "api/[...path].js": {
       "maxDuration": 60
