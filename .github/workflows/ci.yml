@@ -1,178 +1,178 @@
-# # CI for the BRAICE API: pnpm/NestJS checks, the Solana governance program,
-# # and — on main only — an immutable image build through Amazon ECR to Amazon ECS
-# # Fargate.
-# #
-# # Three jobs, deliberately separate. The API and the on-chain program are two
-# # toolchains that cannot fail for the same reason, so a broken program reports
-# # as a Rust failure rather than as a Node failure, and a deployment only
-# # happens when both are green.
-# #
-# # Branch policy, in one place so it is easy to audit:
-# #
-# #   main -> full CI, then build, push to ECR and deploy to ECS Fargate
-# #   dev  -> full CI, nothing else. No image is built, ECR is never written to,
-# #           ECS is never touched.
-# #
-# # main is the only branch that can deploy, and that is enforced twice: by the
-# # job-level `if` on the deploy job, and by an assertion as its first step. Both
-# # read the ref GitHub actually pushed. Nothing about a dev run can reach AWS —
-# # the credentials it would need are never minted, because the job that mints
-# # them is skipped.
+# CI for the BRAICE API: pnpm/NestJS checks, the Solana governance program,
+# and — on main only — an immutable image build through Amazon ECR to Amazon ECS
+# Fargate.
+#
+# Three jobs, deliberately separate. The API and the on-chain program are two
+# toolchains that cannot fail for the same reason, so a broken program reports
+# as a Rust failure rather than as a Node failure, and a deployment only
+# happens when both are green.
+#
+# Branch policy, in one place so it is easy to audit:
+#
+#   main -> full CI, then build, push to ECR and deploy to ECS Fargate
+#   dev  -> full CI, nothing else. No image is built, ECR is never written to,
+#           ECS is never touched.
+#
+# main is the only branch that can deploy, and that is enforced twice: by the
+# job-level `if` on the deploy job, and by an assertion as its first step. Both
+# read the ref GitHub actually pushed. Nothing about a dev run can reach AWS —
+# the credentials it would need are never minted, because the job that mints
+# them is skipped.
 
-# name: CI
+name: CI
 
-# on:
-#   push:
-#     branches: [ "main", "dev" ]
-#   pull_request:
-#     branches: [ "main", "dev" ]
+on:
+    push:
+        branches: ["main", "dev"]
+    pull_request:
+        branches: ["main", "dev"]
 
-# # Least privilege by default. Only the deploy job widens this, and only for the
-# # OIDC token that `aws-actions/configure-aws-credentials` exchanges for short
-# # lived AWS credentials.
-# permissions:
-#   contents: read
+# Least privilege by default. Only the deploy job widens this, and only for the
+# OIDC token that `aws-actions/configure-aws-credentials` exchanges for short
+# lived AWS credentials.
+permissions:
+    contents: read
 
-# # Supersede older runs on the same ref. Everything except a push to main is
-# # cancelled freely, because nothing cancelled here can have been deploying: the
-# # deploy job only ever runs for refs/heads/main, so a superseded dev run has
-# # nothing to lose. Pushes to main are queued rather than cancelled instead, so
-# # an in-flight deployment is never interrupted half way through registering a
-# # new task definition revision.
-# concurrency:
-#   group: ci-${{ github.workflow }}-${{ github.ref }}
-#   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+# Supersede older runs on the same ref. Everything except a push to main is
+# cancelled freely, because nothing cancelled here can have been deploying: the
+# deploy job only ever runs for refs/heads/main, so a superseded dev run has
+# nothing to lose. Pushes to main are queued rather than cancelled instead, so
+# an in-flight deployment is never interrupted half way through registering a
+# new task definition revision.
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# jobs:
-#   # ─────────────────────────────────────────────────────────────────────────────
-#   # API: install, build, lint, typecheck, test
-#   # ─────────────────────────────────────────────────────────────────────────────
-#   build:
-#     name: API (pnpm)
-#     runs-on: ubuntu-latest
+jobs:
+    # ─────────────────────────────────────────────────────────────────────────────
+    # API: install, build, lint, typecheck, test
+    # ─────────────────────────────────────────────────────────────────────────────
+    build:
+        name: API (pnpm)
+        runs-on: ubuntu-latest
 
-#     strategy:
-#       matrix:
-#         node-version: [24.x]
+        strategy:
+            matrix:
+                node-version: [24.x]
 
-#     steps:
-#     - uses: actions/checkout@v4
+        steps:
+            - uses: actions/checkout@v4
 
-#     # Before setup-node on purpose. `cache: 'pnpm'` on setup-node shells out to
-#     # `pnpm store path` to find the cache directory, and that only exists once
-#     # corepack has written the shim. The Ubuntu image has corepack but no pnpm
-#     # shim, so enabling it first is what makes the built-in cache work here
-#     # without adding a third-party setup action.
-#     - name: Enable Corepack (pnpm)
-#       run: corepack enable
+            # Before setup-node on purpose. `cache: 'pnpm'` on setup-node shells out to
+            # `pnpm store path` to find the cache directory, and that only exists once
+            # corepack has written the shim. The Ubuntu image has corepack but no pnpm
+            # shim, so enabling it first is what makes the built-in cache work here
+            # without adding a third-party setup action.
+            - name: Enable Corepack (pnpm)
+              run: corepack enable
 
-#     - name: Use Node.js ${{ matrix.node-version }}
-#       uses: actions/setup-node@v4
-#       with:
-#         node-version: ${{ matrix.node-version }}
-#         # This is a pnpm workspace, so the pnpm store is what should be cached.
-#         cache: 'pnpm'
+            - name: Use Node.js ${{ matrix.node-version }}
+              uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node-version }}
+                  # This is a pnpm workspace, so the pnpm store is what should be cached.
+                  cache: "pnpm"
 
-#     # `npm ci` cannot install a pnpm workspace and has no lockfile entry for it.
-#     - run: pnpm install --frozen-lockfile
+            # `npm ci` cannot install a pnpm workspace and has no lockfile entry for it.
+            - run: pnpm install --frozen-lockfile
 
-#     - run: pnpm build
-#     - run: pnpm lint
-#     - run: pnpm typecheck
-#     - run: pnpm test
+            - run: pnpm build
+            - run: pnpm lint
+            - run: pnpm typecheck
+            - run: pnpm test
 
-#   # ─────────────────────────────────────────────────────────────────────────────
-#   # Governance program: cargo tests, then a real BPF build + IDL generation
-#   # ─────────────────────────────────────────────────────────────────────────────
-#   rust:
-#     name: Governance program (Rust/Anchor)
-#     runs-on: ubuntu-latest
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Governance program: cargo tests, then a real BPF build + IDL generation
+    # ─────────────────────────────────────────────────────────────────────────────
+    rust:
+        name: Governance program (Rust/Anchor)
+        runs-on: ubuntu-latest
 
-#     env:
-#       # The Solana toolchain is not pinned anywhere in the repository —
-#       # programs/braice-governance/Anchor.toml sets only `anchor_version` — so
-#       # it is pinned here instead. This is the combination verified against
-#       # anchor 1.1.2, whose workspace targets solana-program 3.0.0, which is
-#       # what programs/braice-governance/programs/braice-governance/Cargo.toml
-#       # depends on. Change it only together with that dependency.
-#       #
-#       # It matters: `anchor build` compiles to SBPF via `cargo build-sbf`, which
-#       # ships with this installer and downloads the matching platform tools on
-#       # first use.
-#       SOLANA_VERSION: "3.1.10"
+        env:
+            # The Solana toolchain is not pinned anywhere in the repository —
+            # programs/braice-governance/Anchor.toml sets only `anchor_version` — so
+            # it is pinned here instead. This is the combination verified against
+            # anchor 1.1.2, whose workspace targets solana-program 3.0.0, which is
+            # what programs/braice-governance/programs/braice-governance/Cargo.toml
+            # depends on. Change it only together with that dependency.
+            #
+            # It matters: `anchor build` compiles to SBPF via `cargo build-sbf`, which
+            # ships with this installer and downloads the matching platform tools on
+            # first use.
+            SOLANA_VERSION: "3.1.10"
 
-#     steps:
-#     - uses: actions/checkout@v4
+        steps:
+            - uses: actions/checkout@v4
 
-#     - name: Install Rust (stable)
-#       run: rustup toolchain install stable --profile minimal
+            - name: Install Rust (stable)
+              run: rustup toolchain install stable --profile minimal
 
-#     - uses: actions-rust-lang/setup-rust-toolchain@v1
-#       with:
-#         toolchain: stable
+            - uses: actions-rust-lang/setup-rust-toolchain@v1
+              with:
+                  toolchain: stable
 
-#     - name: Cache cargo
-#       uses: actions/cache@v4
-#       with:
-#         path: |
-#           ~/.cargo/registry
-#           ~/.cargo/git
-#         key: ${{ runner.os }}-cargo-${{ hashFiles('programs/**/Cargo.lock') }}
+            - name: Cache cargo
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('programs/**/Cargo.lock') }}
 
-#     # The Ubuntu runner image ships neither Solana nor Anchor, so both have to
-#     # be installed before `anchor build` can mean anything. `anchor build` would
-#     # otherwise fail with a missing `cargo-build-sbf`.
-#     - name: Install Solana toolchain (provides cargo-build-sbf)
-#       run: |
-#         curl -sSfL "https://release.anza.xyz/v${SOLANA_VERSION}/install" -o /tmp/solana-install.sh
-#         sh /tmp/solana-install.sh
-#         echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+            # The Ubuntu runner image ships neither Solana nor Anchor, so both have to
+            # be installed before `anchor build` can mean anything. `anchor build` would
+            # otherwise fail with a missing `cargo-build-sbf`.
+            - name: Install Solana toolchain (provides cargo-build-sbf)
+              run: |
+                  curl -sSfL "https://release.anza.xyz/v${SOLANA_VERSION}/install" -o /tmp/solana-install.sh
+                  sh /tmp/solana-install.sh
+                  echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
-#     # Read the version Anchor.toml pins rather than restating it, so the CLI can
-#     # never drift from the program it is meant to build. Anchor 1.x is a
-#     # different release-asset layout from 0.3x (a bare binary named
-#     # anchor-<version>-<target>, not a tarball), so this is the pinned download
-#     # rather than `avm`.
-#     - name: Resolve pinned Anchor version
-#       id: anchor
-#       run: |
-#         version="$(sed -n 's/^[[:space:]]*anchor_version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
-#           programs/braice-governance/Anchor.toml)"
-#         if [ -z "$version" ]; then
-#           echo "::error::No anchor_version in programs/braice-governance/Anchor.toml"
-#           exit 1
-#         fi
-#         echo "version=$version" >> "$GITHUB_OUTPUT"
+            # Read the version Anchor.toml pins rather than restating it, so the CLI can
+            # never drift from the program it is meant to build. Anchor 1.x is a
+            # different release-asset layout from 0.3x (a bare binary named
+            # anchor-<version>-<target>, not a tarball), so this is the pinned download
+            # rather than `avm`.
+            - name: Resolve pinned Anchor version
+              id: anchor
+              run: |
+                  version="$(sed -n 's/^[[:space:]]*anchor_version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
+                    programs/braice-governance/Anchor.toml)"
+                  if [ -z "$version" ]; then
+                    echo "::error::No anchor_version in programs/braice-governance/Anchor.toml"
+                    exit 1
+                  fi
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
 
-#     - name: Install Anchor ${{ steps.anchor.outputs.version }}
-#       run: |
-#         version="${{ steps.anchor.outputs.version }}"
-#         binary="$HOME/.local/bin/anchor-$version"
-#         curl -sSfL \
-#           "https://github.com/coral-xyz/anchor/releases/download/v${version}/anchor-${version}-x86_64-unknown-linux-gnu" \
-#           -o "$binary"
-#         chmod +x "$binary"
-#         # Anchor resolves `[toolchain] anchor_version` against its own binary
-#         # name, so both names are provided: `anchor` is what the next steps
-#         # call, `anchor-<version>` is the identity Anchor checks itself with.
-#         ln -sf "$binary" "$HOME/.local/bin/anchor"
-#         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-#         anchor --version | grep -qx "anchor-cli $version"
+            - name: Install Anchor ${{ steps.anchor.outputs.version }}
+              run: |
+                  version="${{ steps.anchor.outputs.version }}"
+                  binary="$HOME/.local/bin/anchor-$version"
+                  curl -sSfL \
+                    "https://github.com/coral-xyz/anchor/releases/download/v${version}/anchor-${version}-x86_64-unknown-linux-gnu" \
+                    -o "$binary"
+                  chmod +x "$binary"
+                  # Anchor resolves `[toolchain] anchor_version` against its own binary
+                  # name, so both names are provided: `anchor` is what the next steps
+                  # call, `anchor-<version>` is the identity Anchor checks itself with.
+                  ln -sf "$binary" "$HOME/.local/bin/anchor"
+                  echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+                  anchor --version | grep -qx "anchor-cli $version"
 
-#     - name: Verify Solana toolchain
-#       run: |
-#         solana --version
-#         cargo-build-sbf --version
+            - name: Verify Solana toolchain
+              run: |
+                  solana --version
+                  cargo-build-sbf --version
 
-#     - name: Test governance program
-#       working-directory: programs/braice-governance
-#       run: cargo test --locked
+            - name: Test governance program
+              working-directory: programs/braice-governance
+              run: cargo test --locked
 
-#     - name: Build the BPF program and IDL
-#       working-directory: programs/braice-governance
-#       # Proves the program compiles to BPF and that the IDL the TypeScript
-#       # client is written against still generates.
-#       run: anchor build
+            - name: Build the BPF program and IDL
+              working-directory: programs/braice-governance
+              # Proves the program compiles to BPF and that the IDL the TypeScript
+              # client is written against still generates.
+              run: anchor build
 
 #   # ─────────────────────────────────────────────────────────────────────────────
 #   # Ship it: build → ECR → ECS Fargate, main only
