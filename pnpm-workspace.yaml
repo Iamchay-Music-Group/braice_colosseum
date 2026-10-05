@@ -10,3 +10,22 @@ allowBuilds:
   '@scarf/scarf': false
   bufferutil: false
   utf-8-validate: false
+
+# uuid is pinned back to v11 across the whole tree, including for packages that
+# ask for a newer major.
+#
+# @solana/web3.js pulls in rpc-websockets, which is CommonJS and `require`s uuid.
+# rpc-websockets 9.3.9 asks for uuid ^14, and uuid v14 is ESM-only: no `require`
+# condition in its exports map and `"type": "module"`, so its entry point is
+# dist-node/index.js. CommonJS cannot require an ES module on the Node versions
+# Vercel runs functions on, so every cold start of the API function died with
+# ERR_REQUIRE_ESM before Nest was constructed.
+#
+# v11 is the last major that ships dual CJS/ESM (`exports.node.require` ->
+# dist/cjs/index.js). v4, which is all rpc-websockets uses, is unchanged between
+# the two majors, and v11.1.1 is already in this tree through typeorm, so the
+# override adds no new dependency to the tree. Revisit when rpc-websockets drops
+# the CommonJS build: the override becomes unnecessary the day its `uuid` import
+# is ESM-native.
+overrides:
+  uuid: ^11.1.1
