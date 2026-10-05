@@ -6,6 +6,6 @@
  * own 404 page instead of the JSON error shape Nest returns for every other
  * unknown route.
  */
-const entry = require('../dist/vercel.js');
+const entry = require('../apps/api/dist/vercel.js');
 
 module.exports = entry.default ?? entry;
