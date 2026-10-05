@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BRAICE API</title>
+    <style>
+      body {
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+        margin: 0 auto;
+        max-width: 34rem;
+        padding: 3rem 1.5rem;
+        color: #16181d;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 0.25rem;
+      }
+      p {
+        margin: 0 0 1.5rem;
+        color: #55596a;
+      }
+      ul {
+        padding-left: 1.25rem;
+      }
+      li {
+        margin-bottom: 0.4rem;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>BRAICE API</h1>
+    <p>
+      This deployment serves the API only. The web client is a separate
+      application and points at this host through <code>NEXT_PUBLIC_API_URL</code>.
+    </p>
+    <ul>
+      <li><a href="/api/health">/api/health</a> &mdash; liveness and database check</li>
+      <li><a href="/docs">/docs</a> &mdash; Swagger UI</li>
+      <li><a href="/docs-json">/docs-json</a> &mdash; OpenAPI document</li>
+    </ul>
+  </body>
+</html>
