@@ -1,1 +1,1 @@
-module.exports = require("../dist/vercel.js");
+module.exports = require("../dist/vercel.js").handler;
