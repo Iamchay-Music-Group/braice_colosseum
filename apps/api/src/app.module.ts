@@ -47,8 +47,7 @@ import { HealthController } from './common/health.controller';
       useFactory: (config: ConfigService) => ({
         type: 'postgres' as const,
         url: config.get(
-          'DATABASE_URL',
-          'postgresql://braice:braice_secret@localhost:5433/braice_db',
+          'DATABASE_URL'
         ),
         ssl: {
           rejectUnauthorized: false,
