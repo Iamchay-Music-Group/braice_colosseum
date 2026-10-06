@@ -1,14 +1,14 @@
 /**
  * Vercel serverless entry point.
  *
- * The function Vercel builds for this app is the thin shim at
- * `api/[...path].js`, which re-exports the default export below. The logic
- * lives in `src/` — rather than in a JavaScript file at `api/` — so that it is
- * compiled and type-checked by `nest build` like the rest of the API, and so
- * that Vercel never has to transpile TypeScript whose `tsconfig` extends a base
- * config outside the project directory.
+ * The function Vercel builds for this app is the thin shim at `api/index.js`,
+ * which re-exports the default export below. The logic lives in `src/` — rather
+ * than in a JavaScript file at `api/` — so that it is compiled and type-checked
+ * by `nest build` like the rest of the API, and so that Vercel never has to
+ * transpile TypeScript whose `tsconfig` extends a base config outside the
+ * project directory.
  *
- * Two properties matter here and both are load-bearing:
+ * Three properties matter here and all are load-bearing:
  *
  *   1. NO `app.listen()`. A serverless function is invoked per request and has
  *      no port to bind; binding one either hangs the invocation or leaks a
@@ -18,6 +18,13 @@
  *      pool and the AI provider chain are all built once at startup. Creating
  *      them per request would open a new Postgres pool on every call and
  *      exhaust the database's connection limit, so the promise is cached.
+ *   3. MIGRATIONS BEFORE QUERIES. Nothing else runs the SQL in
+ *      `database/migrations` against production — `pnpm db:migrate` is a
+ *      local/CI command — so the first query of a fresh database used to die
+ *      with `relation "users" does not exist`. `ensureMigrated()` applies the
+ *      pending migrations once per instance, before TypeORM ever executes a
+ *      statement, and the files are added to the function bundle through
+ *      `includeFiles` in `vercel.json`.
  *
  * A failed initialization clears the cache rather than keeping the rejection:
  * the usual cause is the managed database not accepting connections on the very
@@ -30,6 +37,7 @@ import { NestFactory } from '@nestjs/core';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { configureApp } from './app.setup';
 import { AppModule } from './app.module';
+import { runMigrations } from './scripts/migrate';
 
 /**
  * The shape a request listener needs to have.
@@ -42,6 +50,34 @@ import { AppModule } from './app.module';
 type RequestListener = (req: IncomingMessage, res: ServerResponse) => unknown;
 
 let appPromise: Promise<INestApplication> | undefined;
+let migrationPromise: Promise<void> | undefined;
+
+/**
+ * Apply pending SQL migrations, at most once per function instance.
+ *
+ * A failure is logged rather than rethrown: if the database was unreachable
+ * only for a moment, TypeORM's own connect below still decides whether the
+ * boot survives, and the cached promise is cleared so the next invocation
+ * retries the migrations instead of running queries against a schema that
+ * was never applied. If a migration file itself is broken, the error stays
+ * visible in the function logs on every retry until the next deploy.
+ */
+async function ensureMigrated(): Promise<void> {
+  if (!migrationPromise) {
+    migrationPromise = (async () => {
+      const connectionString = process.env.DATABASE_URL;
+      if (!connectionString) {
+        throw new Error('DATABASE_URL is not set; cannot run migrations');
+      }
+      await runMigrations(connectionString);
+    })().catch((error: unknown) => {
+      migrationPromise = undefined;
+      console.error('[migrations] failed; continuing boot:', error);
+    });
+  }
+
+  return migrationPromise;
+}
 
 /**
  * The initialized Nest application for this function instance.
@@ -53,6 +89,7 @@ let appPromise: Promise<INestApplication> | undefined;
 async function getServerlessApp(): Promise<INestApplication> {
   if (!appPromise) {
     appPromise = (async () => {
+      await ensureMigrated();
       const app = configureApp(await NestFactory.create(AppModule));
       await app.init();
       return app;
