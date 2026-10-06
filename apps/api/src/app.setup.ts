@@ -54,7 +54,7 @@ export function buildOpenApiConfig(): ReturnType<DocumentBuilder['build']> {
     .addTag(
       'Activity',
       'Individual activity ingestion (operator only). There is no route that ' +
-        'returns an individual record; only a count.',
+      'returns an individual record; only a count.',
     )
     .addTag('Access Requests', 'Permission proposals awaiting governance')
     .addTag('Datasets', 'Community-level aggregates. Governed reads.')
@@ -75,8 +75,14 @@ export function configureApp(app: INestApplication): INestApplication {
   app.setGlobalPrefix('api');
 
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: [
+      'https://braice.iamchaymusicgroup.com',
+      'https://dev.d3hz3f8qwa1rpe.amplifyapp.com',
+      'http://localhost:3000',
+    ],
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   app.useGlobalPipes(
