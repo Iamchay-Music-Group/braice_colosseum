@@ -3,17 +3,19 @@
   "framework": null,
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm run build",
-  "outputDirectory": "public",
   "functions": {
     "api/[...path].js": {
-      "maxDuration": 60
-    },
-    "api/index.js": {
       "maxDuration": 60
     }
   },
   "rewrites": [
-    { "source": "/docs", "destination": "/api/docs" },
-    { "source": "/docs/:path*", "destination": "/api/docs/:path*" }
+    {
+      "source": "/docs",
+      "destination": "/api/docs"
+    },
+    {
+      "source": "/docs/:path*",
+      "destination": "/api/docs/:path*"
+    }
   ]
 }
