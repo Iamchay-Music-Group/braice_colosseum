@@ -64,6 +64,25 @@ import { HealthController } from './common/health.controller';
       },
     }),
     TypeOrmModule.forRootAsync({
+      TypeOrmModule.forRootAsync({
+        imports: [ConfigModule],
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => ({
+          type: 'postgres' as const,
+
+          url: config.get(
+            'DATABASE_URL',
+            'postgresql://braice:braice_secret@localhost:5433/braice_db',
+          ),
+
+          ssl: {
+            rejectUnauthorized: false,
+          },
+
+          autoLoadEntities: true,
+          synchronize: false,
+        }),
+      }),
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -89,5 +108,5 @@ import { HealthController } from './common/health.controller';
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule { }
 
