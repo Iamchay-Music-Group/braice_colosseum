@@ -361,30 +361,30 @@ export class AiService {
       );
     }
 
-    const [topCategory, topPercent] = ranked[0];
-    const [secondCategory, secondPercent] = ranked[1] ?? [null, null];
+    const topCategories = ranked.slice(0, 3);
+    const parts: string[] = [];
 
-    const parts: string[] = [
-      `${topCategory} is the strongest interest at ${topPercent}% of ${insight.sourceCount} aggregated activity records.`,
-    ];
-
-    if (secondCategory && secondPercent !== null) {
-      const gap = topPercent - secondPercent;
+    if (topCategories.length === 1) {
+      const [category, percent] = topCategories[0];
       parts.push(
-        gap >= 5
-          ? `It leads ${secondCategory} (${secondPercent}%) by ${gap} points.`
-          : `${secondCategory} follows closely at ${secondPercent}%.`,
+        `The strongest emerging interest in the community is ${category} (${percent}%).`,
+      );
+    } else if (topCategories.length === 2) {
+      const [first, second] = topCategories;
+      parts.push(
+        `The strongest emerging interests in the community are ${first[0]} (${first[1]}%) and ${second[0]} (${second[1]}%).`,
+      );
+    } else {
+      const [first, second, third] = topCategories;
+      parts.push(
+        `The strongest emerging interests in the community are ${first[0]} (${first[1]}%) and ${second[0]} (${second[1]}%), followed by ${third[0]} (${third[1]}%).`,
       );
     }
 
-    const total = ranked.reduce((sum, [, pct]) => sum + pct, 0);
-    if (total > 0 && ranked.length >= 3) {
+    if (topCategories.length >= 2) {
+      const topTotal = topCategories.reduce((sum, [, pct]) => sum + pct, 0);
       parts.push(
-        `Across ${ranked.length} categories the remaining interests are ` +
-          `${ranked
-            .slice(2)
-            .map(([c, p]) => `${c} ${p}%`)
-            .join(', ')}.`,
+        `These three categories together account for ${topTotal} % of the aggregated activity records.`,
       );
     }
 
