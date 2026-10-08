@@ -7,7 +7,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditEventType } from '../audit/entities/audit-event.entity';
 import { AiQueryDto } from './dto/ai-query.dto';
 
-const PRINCIPAL = 'brand-user-id';
+const PRINCIPAL = 'partner-user-id';
 const COMMUNITY = 'community-uuid';
 
 const QUERY: AiQueryDto = {

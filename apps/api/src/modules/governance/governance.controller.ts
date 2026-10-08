@@ -66,8 +66,8 @@ export class GovernanceController {
     summary: 'Issue a permission from an approved decision',
     description:
       'Operator only. The principal is the application that will exercise the ' +
-      'permission (typically the AI agent), not the brand that made the request. ' +
-      'A brand requesting access never grants the brand itself data access.',
+      'permission (typically the AI agent), not the partner that made the request. ' +
+      'A partner requesting access never grants the partner itself data access.',
   })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   @ApiForbiddenResponse({

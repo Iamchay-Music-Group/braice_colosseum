@@ -17,7 +17,7 @@ export class IssuePermissionDto {
     example: 'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33',
     description:
       'The principal the permission is granted to — the application that will ' +
-      'exercise it, not the brand that requested access.',
+      'exercise it, not the partner that requested access.',
   })
   @IsUUID()
   principalId!: string;

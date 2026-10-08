@@ -15,7 +15,7 @@ const COMMUNITY = 'community-uuid';
 const DATASET = 'dataset-uuid';
 const OPERATOR = { sub: 'operator-id' } as JwtPayload;
 const MEMBER = { sub: 'member-id' } as JwtPayload;
-const BRAND = { sub: 'brand-id' } as JwtPayload;
+const PARTNER = { sub: 'partner-id' } as JwtPayload;
 
 const DATASET_ROW: CommunityDataset = {
   id: DATASET,
@@ -148,7 +148,7 @@ describe('DatasetsController', () => {
 
     it('refuses a caller who is neither member nor operator', async () => {
       await expect(
-        controller.findByCommunity(COMMUNITY, BRAND),
+        controller.findByCommunity(COMMUNITY, PARTNER),
       ).rejects.toThrow(ForbiddenException);
     });
 

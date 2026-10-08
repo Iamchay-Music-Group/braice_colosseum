@@ -3,7 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 /**
  * Account roles.
  *
- * CREATOR, BRAND and APPLICATION describe a user's relationship to a
+ * CREATOR, PARTNER and APPLICATION describe a user's relationship to a
  * community; they are assigned by governance or an operator tool, never by the
  * person registering. `POST /api/auth/register` always creates a MEMBER.
  *
@@ -15,14 +15,14 @@ import { ApiProperty } from '@nestjs/swagger';
 export enum CreateUserType {
   CREATOR = 'CREATOR',
   MEMBER = 'MEMBER',
-  BRAND = 'BRAND',
+  PARTNER = 'PARTNER',
   APPLICATION = 'APPLICATION',
 }
 
 export const USER_TYPE_VALUES: readonly CreateUserType[] = [
   CreateUserType.CREATOR,
   CreateUserType.MEMBER,
-  CreateUserType.BRAND,
+  CreateUserType.PARTNER,
   CreateUserType.APPLICATION,
 ];
 

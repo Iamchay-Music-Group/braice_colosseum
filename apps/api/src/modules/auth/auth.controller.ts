@@ -164,7 +164,7 @@ export class AuthController {
     description:
       'Identity as it currently stands. The account claims (email, userType) are ' +
       'read from the database rather than echoed from the token, so a role ' +
-      'granted after sign-in — governance promoting MEMBER to BRAND, say — is ' +
+      'granted after sign-in — governance promoting MEMBER to PARTNER, say — is ' +
       'visible immediately instead of at the next login. Token claims (sub, ' +
       'amr, jti, exp) are returned as issued. Call this rather than decoding ' +
       'the token client-side.',

@@ -11,7 +11,7 @@ import { AuthorizationService } from '../authorization/authorization.service';
 import { DatasetsService } from '../datasets/datasets.service';
 import { CommunityDataset } from '../datasets/entities/community-dataset.entity';
 
-const PRINCIPAL = 'brand-user-id';
+const PRINCIPAL = 'partner-user-id';
 const COMMUNITY = 'community-uuid';
 const PURPOSE = 'campaign_planning';
 

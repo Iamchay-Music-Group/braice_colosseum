@@ -22,7 +22,7 @@ export enum AccessRequestStatus {
 }
 
 /**
- * A brand's request to use a community's aggregated intelligence.
+ * A partner's request to use a community's aggregated intelligence.
  *
  * A request is a proposal. It becomes enforceable only after governance
  * approves it and a Permission is created from the decision.

@@ -103,7 +103,7 @@ Scenarios A–I of the Build Plan §58 Definition of Done all pass. 542 backend 
 |---|---|---|
 | A | Community generates activity | Pass |
 | B | BRAICE generates community intelligence | Pass |
-| C | Brand requests access | Pass |
+| C | Partner requests access | Pass |
 | D | Governance approves | Pass |
 | E | Permission is created | Pass |
 | F | AI analyzes authorized data | Pass |
@@ -163,7 +163,7 @@ Every supporting artifact was written and then never wired:
 | `useDatasetContents` | `hooks/use-community.ts:89-101` | **zero** |
 | `useGenerateDataset` (POST `datasets/generate`) | `hooks/use-community.ts:150-156` | **zero** |
 
-This is the screen that shows the brand *what it is buying*. It is also mostly wiring rather than new code — the data path and the renderer both already exist.
+This is the screen that shows the partner *what it is buying*. It is also mostly wiring rather than new code — the data path and the renderer both already exist.
 
 `/communities` (`communities/page.tsx:83-108`) likewise shows no member count and no intelligence.
 

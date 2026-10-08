@@ -281,30 +281,30 @@ export class GovernanceService {
     // recognised them as a data consumer. Deliberately after the anchor and the
     // decision write — the decision is the part that must not be undone.
     if (evaluation.decision === DecisionType.APPROVED) {
-      await this.promoteRequesterToBrand(request, principalId);
+      await this.promoteRequesterToPartner(request, principalId);
     }
 
     return saved;
   }
 
   /**
-   * Promote an approved requester from MEMBER to BRAND.
+   * Promote an approved requester from MEMBER to PARTNER.
    *
    * Account roles are not self-declared — `POST /auth/register` always creates a
    * MEMBER — so without this the enum had nothing that could ever write
-   * CREATOR/BRAND/APPLICATION and `UsersService.setUserType` had no callers at
+   * CREATOR/PARTNER/APPLICATION and `UsersService.setUserType` had no callers at
    * all. Governance is the thing that knows, so it is the thing that decides.
    *
-   * Only ever MEMBER to BRAND, and never a downgrade: a CREATOR who files an
+   * Only ever MEMBER to PARTNER, and never a downgrade: a CREATOR who files an
    * access request against their own community stays a CREATOR, and an
-   * APPLICATION stays one. A brand asking a second question is still a brand.
+   * APPLICATION stays one. A partner asking a second question is still a partner.
    *
    * Fail-soft by design. The decision is already saved, anchored, and in the
    * audit trail; a profile update failing must not turn an approved request into
    * a 500 and invite a retry that records a second decision. The failure is
    * logged and written to the trail instead.
    */
-  private async promoteRequesterToBrand(
+  private async promoteRequesterToPartner(
     request: AccessRequest,
     actorId: string,
   ): Promise<void> {
@@ -317,7 +317,7 @@ export class GovernanceService {
 
       await this.usersService.setUserType(
         requester.id,
-        CreateUserType.BRAND,
+        CreateUserType.PARTNER,
       );
 
       await this.auditService.record({
@@ -329,19 +329,19 @@ export class GovernanceService {
           scope: 'account',
           userId: requester.id,
           from: CreateUserType.MEMBER,
-          to: CreateUserType.BRAND,
+          to: CreateUserType.PARTNER,
           reason: 'Access request approved by community governance',
           requestId: request.id,
         },
       });
 
       this.logger.log(
-        `Promoted ${requester.id} to BRAND: governance approved request ${request.id}`,
+        `Promoted ${requester.id} to PARTNER: governance approved request ${request.id}`,
       );
     } catch (err) {
       this.logger.error(
         `Approved request ${request.id} but could not promote ` +
-          `${request.requesterId} to BRAND: ${(err as Error).message}`,
+          `${request.requesterId} to PARTNER: ${(err as Error).message}`,
       );
 
       await this.auditService.record({
@@ -352,7 +352,7 @@ export class GovernanceService {
         metadata: {
           scope: 'account',
           userId: request.requesterId,
-          to: CreateUserType.BRAND,
+          to: CreateUserType.PARTNER,
           applied: false,
           reason: 'Promotion failed after approval; the decision stands',
           requestId: request.id,
@@ -399,8 +399,8 @@ export class GovernanceService {
    * Issue the permission that a governance approval authorises.
    *
    * The principal is the AI agent that will exercise the permission, which is
-   * distinct from the brand that requested access. That separation is the
-   * point: a brand's request does not hand the brand itself any data access.
+   * distinct from the partner that requested access. That separation is the
+   * point: a partner's request does not hand the partner itself any data access.
    *
    * `actorId` is the operator recording the issue, which is not the same as the
    * grantee. They were previously the same value, so every PERMISSION_CREATED

@@ -24,7 +24,7 @@ const RESOURCE: ProtectedResource = {
 
 function input(overrides: Partial<AccessEvaluationInput> = {}): AccessEvaluationInput {
   return {
-    principalId: 'brand-user-id',
+    principalId: 'partner-user-id',
     resource: RESOURCE,
     purpose: 'campaign_planning',
     operation: Operation.ANALYZE,
@@ -37,7 +37,7 @@ function permission(overrides: Partial<Permission> = {}): Permission {
   return {
     id: 'permission-1',
     accessRequestId: 'request-1',
-    principalId: 'brand-user-id',
+    principalId: 'partner-user-id',
     resourceId: 'dataset-uuid',
     purpose: 'campaign_planning',
     operation: Operation.ANALYZE,

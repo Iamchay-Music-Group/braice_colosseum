@@ -13,7 +13,7 @@ export class UserResponseDto {
   @ApiProperty({ example: 'Afrobeat King' })
   displayName!: string;
 
-  @ApiProperty({ example: 'CREATOR', enum: ['CREATOR', 'MEMBER', 'BRAND', 'APPLICATION', 'ADMIN'] })
+  @ApiProperty({ example: 'CREATOR', enum: ['CREATOR', 'MEMBER', 'PARTNER', 'APPLICATION', 'ADMIN'] })
   userType!: string;
 
   @ApiProperty({ example: '2026-09-23T12:00:00.000Z' })

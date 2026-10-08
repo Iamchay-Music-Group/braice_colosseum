@@ -25,7 +25,7 @@ Community generates activity
         ↓
 BRAICE aggregates into community intelligence
         ↓
-Brand requests access
+Partner requests access
         ↓
 Community governance evaluates the request
         ↓
@@ -57,7 +57,7 @@ If any check fails, access is denied.
 ### Data Separation
 
 BRAICE maintains a strict boundary:
-- **Individual activity records** — Never exposed to brands or AI
+- **Individual activity records** — Never exposed to partners or AI
 - **Community-level intelligence** — Aggregated percentages only
 
 The aggregation pipeline transforms 1,000 individual records into something like:
@@ -103,7 +103,7 @@ The community can revoke access at any time. When revoked:
 │                                                │                 │
 │                                                ▼                 │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐         │
-│  │    Brand     │───▶│   Access    │───▶│  Community  │         │
+│  │    Partner  │───▶│   Access    │───▶│  Community  │         │
 │  │   Request    │    │   Request   │    │ Intelligence│         │
 │  └─────────────┘    └──────┬──────┘    └─────────────┘         │
 │                            │                                     │
@@ -122,7 +122,7 @@ The community can revoke access at any time. When revoked:
 │              ┌─────────────┴─────────────┐                     │
 │              ▼                           ▼                     │
 │  ┌─────────────────┐         ┌─────────────────┐               │
-│  │  AI Gateway     │         │  Brand API      │               │
+│  │  AI Gateway     │         │  Partner API    │               │
 │  │  (Permission-   │         │  (Permission-   │               │
 │  │   aware tools)  │         │   checked)      │               │
 │  └────────┬────────┘         └────────┬────────┘               │
@@ -145,7 +145,7 @@ The community can revoke access at any time. When revoked:
 
 1. **Community generates activity** — Members interact, creating individual-level data
 2. **Aggregation** — BRAICE aggregates into community intelligence (percentages)
-3. **Brand requests access** — Submits request with purpose and operation
+3. **Partner requests access** — Submits request with purpose and operation
 4. **Governance evaluates** — Creator approves + community threshold met
 5. **Permission created** — Machine-readable authorization policy
 6. **AI analyzes** — AI agent uses permission-aware tools to access authorized data
@@ -383,7 +383,7 @@ braice_colosseum_bend/
 │       │       ├── memberships/          # Community membership
 │       │       ├── activity/             # Individual activity (PROTECTED)
 │       │       ├── datasets/             # Aggregation pipeline
-│       │       ├── access-requests/      # Brand access requests
+│       │       ├── access-requests/      # Partner access requests
 │       │       ├── governance/           # Governance engine
 │       │       ├── permissions/          # Permission engine (CORE)
 │       │       ├── authorization/        # Authorization gateway
@@ -570,7 +570,7 @@ Notes:
    also `select: false`; publishing them would tell an attacker how many guesses
    remain
 5. **AI has no database access** — Only permission-aware tools
-6. **Activity records are protected** — Never exposed to brands or AI
+6. **Activity records are protected** — Never exposed to partners or AI
 7. **Blockchain is for verification** — Not the primary database, and not a
    credential. A grant whose principal has no linked wallet is still fully
    enforceable off-chain; it is simply not anchored.
@@ -594,7 +594,7 @@ pnpm typecheck
 ### Security Tests
 
 The following must fail with appropriate errors:
-- Brand accessing individual activity records → 403
+- Partner accessing individual activity records → 403
 - AI requesting member data → DENIED
 - Expired permission access → DENIED
 - Revoked permission access → DENIED
@@ -610,7 +610,7 @@ The hackathon demo follows this exact sequence:
 1. **Show community** — Afrobeat Creators with 100 members
 2. **Show data** — 1,000 individual activities
 3. **Show aggregation** — Community intelligence percentages
-4. **Brand request** — Nike requests access for campaign planning
+4. **Partner request** — Nike requests access for campaign planning
 5. **Governance** — Creator approves, community threshold met
 6. **Permission** — Machine-readable permission created
 7. **AI analysis** — AI answers community questions

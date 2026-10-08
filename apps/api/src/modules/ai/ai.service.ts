@@ -384,7 +384,7 @@ export class AiService {
     if (topCategories.length >= 2) {
       const topTotal = topCategories.reduce((sum, [, pct]) => sum + pct, 0);
       parts.push(
-        `These three categories together account for ${topTotal} % of the aggregated activity records.`,
+        `These three categories together account for ${topTotal}% of the aggregated activity records.`,
       );
     }
 

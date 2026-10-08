@@ -7,7 +7,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import type { JwtPayload } from '../auth/auth.service';
 
 const OPERATOR = { sub: 'operator-id' } as JwtPayload;
-const OTHER = { sub: 'random-brand' } as JwtPayload;
+const OTHER = { sub: 'random-partner' } as JwtPayload;
 const COMMUNITY = 'community-uuid';
 const PERMISSION = 'permission-uuid';
 const RESOURCE = 'dataset-uuid';

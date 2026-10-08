@@ -371,7 +371,7 @@ export class AuthService {
    *
    * Echoing the token back is wrong for any claim that describes the account
    * rather than the token. `userType` moves without the account doing anything:
-   * governance promotes MEMBER to BRAND when it approves an access request, and
+   * governance promotes MEMBER to PARTNER when it approves an access request, and
    * an operator can change a membership role. A token is good for
    * JWT_TTL_SECONDS, so a client reading the role off the token would show a
    * promoted user the wrong role until they happened to sign in again — and

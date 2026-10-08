@@ -1,7 +1,7 @@
 export enum UserType {
   CREATOR = 'CREATOR',
   MEMBER = 'MEMBER',
-  BRAND = 'BRAND',
+  PARTNER = 'PARTNER',
   APPLICATION = 'APPLICATION',
   ADMIN = 'ADMIN',
 }

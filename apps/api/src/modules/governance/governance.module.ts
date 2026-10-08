@@ -20,7 +20,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
     AuditModule,
     BlockchainModule,
     AuthModule,
-    // For the BRAND promotion that follows an approval. UsersModule imports
+    // For the PARTNER promotion that follows an approval. UsersModule imports
     // nothing, so this cannot close a cycle.
     UsersModule,
   ],

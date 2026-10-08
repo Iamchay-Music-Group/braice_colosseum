@@ -15,9 +15,9 @@ INSERT INTO users (id, email, password_hash, display_name, user_type, wallet_add
 ('11111111-1111-4111-8111-111111111111', 'test-creator@fixtures.braice.local', 'scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ffa3bbb4361dba1a76c5d9c41f2dc034cee356ff6ef09f1c67717139847e32e1a12f41f62dbe84ca7d0b9d4a69ec31e5c6606174b057d1cff763991b81', 'Test Creator', 'CREATOR', 'TestCreatorWallet1111111111111111111111')
 ON CONFLICT DO NOTHING;
 
--- Test brand (requester)
+-- Test partner (requester)
 INSERT INTO users (id, email, password_hash, display_name, user_type, wallet_address) VALUES
-('22222222-2222-4222-8222-222222222222', 'test-brand@fixtures.braice.local', 'scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ffa3bbb4361dba1a76c5d9c41f2dc034cee356ff6ef09f1c67717139847e32e1a12f41f62dbe84ca7d0b9d4a69ec31e5c6606174b057d1cff763991b81', 'Test Brand', 'BRAND', 'TestBrandWallet11111111111111111111111111')
+('22222222-2222-4222-8222-222222222222', 'test-partner@fixtures.braice.local', 'scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ffa3bbb4361dba1a76c5d9c41f2dc034cee356ff6ef09f1c67717139847e32e1a12f41f62dbe84ca7d0b9d4a69ec31e5c6606174b057d1cff763991b81', 'Test Partner', 'PARTNER', 'TestPartnerWallet11111111111111111111111111')
 ON CONFLICT DO NOTHING;
 
 -- Test community

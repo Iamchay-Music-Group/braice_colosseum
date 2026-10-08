@@ -789,14 +789,14 @@ describe('AuthService', () => {
     it('still works for a wallet that is already linked to an account', async () => {
       const wallet = makeWallet();
       usersService.findByWalletOrNull.mockResolvedValue(
-        await userWithPassword({ walletAddress: wallet.publicKey, userType: 'BRAND' }),
+        await userWithPassword({ walletAddress: wallet.publicKey, userType: 'PARTNER' }),
       );
 
       const { token } = await signIn(wallet);
       const payload = await service.validateToken(token);
 
       expect(payload.amr).toBe('wallet');
-      expect(payload.userType).toBe('BRAND');
+      expect(payload.userType).toBe('PARTNER');
     });
 
     it('cannot create an account', async () => {
@@ -1048,19 +1048,19 @@ describe('AuthService', () => {
 
     // The bug this fixes: /auth/me echoed the token, so a role granted after
     // sign-in was invisible until the next login. Governance promotes MEMBER to
-    // BRAND when it approves an access request, so a user could sit on a stale
+    // PARTNER when it approves an access request, so a user could sit on a stale
     // "Member" badge for the whole life of their token.
     it('reports the role the account holds now, not the one frozen in the token', async () => {
       const principal = await signedInToken();
       expect(principal.userType).toBe(CreateUserType.MEMBER);
 
       usersService.findById.mockResolvedValue(
-        await userWithPassword({ userType: CreateUserType.BRAND }),
+        await userWithPassword({ userType: CreateUserType.PARTNER }),
       );
 
       const current = await service.currentPrincipal(principal);
 
-      expect(current.userType).toBe(CreateUserType.BRAND);
+      expect(current.userType).toBe(CreateUserType.PARTNER);
     });
 
     it('resolves the account from the verified token id', async () => {
@@ -1079,7 +1079,7 @@ describe('AuthService', () => {
 
       usersService.findById.mockResolvedValue(
         await userWithPassword({
-          userType: CreateUserType.BRAND,
+          userType: CreateUserType.PARTNER,
           email: 'renamed@example.com',
         }),
       );

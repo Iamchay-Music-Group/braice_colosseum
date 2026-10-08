@@ -469,7 +469,7 @@ describe('GovernanceService', () => {
       );
     });
 
-    it('grants nothing to the requesting brand merely because it was approved', async () => {
+    it('grants nothing to the requesting partner merely because it was approved', async () => {
       seedHappyPath({ totalMembers: 2 });
       decisionRepo.create.mockImplementation((d) => d);
       decisionRepo.save.mockImplementation(async (d) => ({ id: 'dec-1', ...d }));
@@ -503,7 +503,7 @@ describe('GovernanceService', () => {
 
     it('lets the requester read the outcome of their own request', async () => {
       // Regression: the operator gate used to run first, making the requester
-      // arm unreachable and denying a brand the result of its own request.
+      // arm unreachable and denying a partner the result of its own request.
       seedHappyPath();
       decisionRepo.find.mockResolvedValue([]);
 
@@ -530,7 +530,7 @@ describe('GovernanceService', () => {
     });
   });
   describe('governance-driven account roles', () => {
-    it('promotes an approved MEMBER requester to BRAND', async () => {
+    it('promotes an approved MEMBER requester to PARTNER', async () => {
       seedHappyPath();
       decisionRepo.save.mockImplementation(async (d) => ({ id: 'dec-1', ...d }));
 
@@ -538,7 +538,7 @@ describe('GovernanceService', () => {
 
       expect(usersService.setUserType).toHaveBeenCalledWith(
         REQUESTER,
-        CreateUserType.BRAND,
+        CreateUserType.PARTNER,
       );
     });
 
@@ -555,15 +555,15 @@ describe('GovernanceService', () => {
             scope: 'account',
             userId: REQUESTER,
             from: CreateUserType.MEMBER,
-            to: CreateUserType.BRAND,
+            to: CreateUserType.PARTNER,
           }),
         }),
       );
     });
 
     // A creator filing a request against their own community is the operator
-    // approving their own access, not a member asking to become a brand. The
-    // promotion is MEMBER -> BRAND precisely so it cannot overwrite that.
+    // approving their own access, not a member asking to become a partner. The
+    // promotion is MEMBER -> PARTNER precisely so it cannot overwrite that.
     it('never downgrades a requester that already holds a role', async () => {
       seedHappyPath();
       usersService.findById.mockResolvedValue({

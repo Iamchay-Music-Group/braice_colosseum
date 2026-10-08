@@ -49,6 +49,10 @@ programs/braice-governance/.anchor/
 # the repo enormous and it is not reproducible state worth keeping. Delete the
 # directory freely; recreating it is one command.
 programs/braice-governance/test-ledger/
+# The same ledger when the validator is started from the repo root rather than
+# the program directory — `solana-test-validator` writes into whatever directory
+# it is launched in, so the root collects its own copy of the same ~600 MB.
+/test-ledger/
 # The Anchor workspace carries a package.json only so its integration test can
 # resolve @braice/blockchain-client and web3.js. The Rust builds with cargo, so
 # the dependency tree belongs in pnpm's store, not in git.

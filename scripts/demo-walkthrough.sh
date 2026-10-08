@@ -156,12 +156,12 @@ if ! curl -sf --max-time 5 "${API_URL%/api}/api/health" >/dev/null 2>&1; then
 fi
 
 # --- 1 --------------------------------------------------------------------
-step "1. Register and sign in as Creator, Brand, and AI Agent"
+step "1. Register and sign in as Creator, Partner, and AI Agent"
 read -r CREATOR_TOKEN CREATOR_ID CREATOR_EMAIL <<< "$(register 'Afrobeat King (Creator)' creator)"
-read -r BRAND_TOKEN   BRAND_ID   BRAND_EMAIL   <<< "$(register 'Nike (Brand)' brand)"
+read -r PARTNER_TOKEN PARTNER_ID  PARTNER_EMAIL <<< "$(register 'Nike (Partner)' partner)"
 read -r AGENT_TOKEN   AGENT_ID   AGENT_EMAIL   <<< "$(register 'BRAICE AI Agent' agent)"
 ok "creator  $CREATOR_EMAIL"
-ok "brand    $BRAND_EMAIL"
+ok "partner  $PARTNER_EMAIL"
 ok "agent    $AGENT_EMAIL"
 
 # Only the agent links a wallet. Everyone else operates entirely off-chain, and
@@ -230,16 +230,16 @@ info "percentages only: $(jget "$DATASET" data)"
 ok "no member identifiers present in the dataset"
 
 # --- 6 --------------------------------------------------------------------
-step "6. Brand requests access (campaign_planning / ANALYZE)"
-# The brand joins first: requesting access to a community's data is something
+step "6. Partner requests access (campaign_planning / ANALYZE)"
+# The partner joins first: requesting access to a community's data is something
 # its members do, and the check reads live membership rather than the token, so
 # a removal takes effect immediately instead of lasting until the token expires.
-api POST "/communities/$COMMUNITY_ID/members" '' "$BRAND_TOKEN" >/dev/null
-ok "brand joined the community"
+api POST "/communities/$COMMUNITY_ID/members" '' "$PARTNER_TOKEN" >/dev/null
+ok "partner joined the community"
 # No requesterId: the requester is whoever holds this token, and the body is
 # validated with forbidNonWhitelisted, so sending the field at all is now a 400
-# rather than something quietly dropped. The brand's token is what files it.
-REQUEST="$(api POST /access-requests "{\"communityId\":\"$COMMUNITY_ID\",\"datasetId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\",\"requestedDurationSeconds\":2592000}" "$BRAND_TOKEN")"
+# rather than something quietly dropped. The partner's token is what files it.
+REQUEST="$(api POST /access-requests "{\"communityId\":\"$COMMUNITY_ID\",\"datasetId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\",\"requestedDurationSeconds\":2592000}" "$PARTNER_TOKEN")"
 REQUEST_ID="$(jget "$REQUEST" id)"
 ok "request $REQUEST_ID status=$(jget "$REQUEST" status)"
 info "a request grants nothing on its own"
@@ -249,7 +249,7 @@ step "7. Governance: creator approves, threshold met"
 # Every enrolled member approves. With a 60% threshold derived from live ACTIVE
 # membership this clears comfortably whichever way the count lands: 100 members
 # plus the creator is 101 approvals against a threshold of at most ceil(102 * 60
-# / 100) = 62, and the brand's own join in step 6 is what moves 101 to 102.
+# / 100) = 62, and the partner's own join in step 6 is what moves 101 to 102.
 APPROVERS="[\"$CREATOR_ID\""
 for MID in "${MEMBER_IDS[@]}"; do APPROVERS="$APPROVERS,\"$MID\""; done
 APPROVERS="$APPROVERS]"
@@ -278,7 +278,7 @@ fi
 
 deny "agent, wrong purpose   -> $(jget "$(api POST /authorize "{\"resourceId\":\"$DATASET_ID\",\"purpose\":\"market_research\",\"operation\":\"ANALYZE\"}" "$AGENT_TOKEN")" reason)"
 deny "agent, wrong operation -> $(jget "$(api POST /authorize "{\"resourceId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"EXPORT\"}" "$AGENT_TOKEN")" reason)"
-deny "brand (no permission)  -> $(jget "$(api POST /authorize "{\"resourceId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\"}" "$BRAND_TOKEN")" reason)"
+deny "partner (no permission) -> $(jget "$(api POST /authorize "{\"resourceId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\"}" "$PARTNER_TOKEN")" reason)"
 
 NO_TOKEN="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$API_URL/authorize" \
   -H 'Content-Type: application/json' \
@@ -293,7 +293,7 @@ ok "permission revoked"
 deny "agent after revocation -> $(jget "$(api POST /authorize "{\"resourceId\":\"$DATASET_ID\",\"purpose\":\"campaign_planning\",\"operation\":\"ANALYZE\"}" "$AGENT_TOKEN")" reason)"
 
 FORGERY="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$API_URL/permissions/$PERMISSION_ID/revoke" \
-  -H 'Content-Type: application/json' -H "Authorization: Bearer $BRAND_TOKEN" -d '{}')"
-deny "brand attempting to revoke -> HTTP $FORGERY (operator-only)"
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $PARTNER_TOKEN" -d '{}')"
+deny "partner attempting to revoke -> HTTP $FORGERY (operator-only)"
 
 printf "\n${BOLD}${GREEN}Demo complete.${NC} Every denial above was decided server-side by the permission engine.\n\n"

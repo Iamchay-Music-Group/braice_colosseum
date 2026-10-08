@@ -2,11 +2,11 @@
  * Demo seed.
  *
  * Builds the full BRAICE scenario end to end:
- *   1. Creator, brand, AI agent, and 100 community members
+ *   1. Creator, partner, AI agent, and 100 community members
  *   2. A community with CREATOR_AND_THRESHOLD governance at 60%
  *   3. 1000 individual activity records
  *   4. Aggregation into a community-level dataset (percentages only)
- *   5. A brand access request, a governance decision, and a permission
+ *   5. A partner access request, a governance decision, and a permission
  *
  * Every step goes through the real API so the seeded state is exactly what a
  * live client would produce. Individual member identifiers are never written
@@ -87,7 +87,7 @@ const ACTIVITY_COUNT = 1000;
 
 interface Seeded {
   creatorToken: string;
-  brandToken: string;
+  partnerToken: string;
   agentToken: string;
   communityId: string;
   datasetId: string;
@@ -243,12 +243,12 @@ async function main(): Promise<void> {
   console.log(`\nBRAICE demo seed against ${BASE_URL}\n`);
 
   // --- 1. Identities -----------------------------------------------------
-  console.log('1. Registering creator, brand, and AI agent');
+  console.log('1. Registering creator, partner, and AI agent');
   const creator = await signInAs('Afrobeat King (Creator)', 'creator');
-  const brand = await signInAs('Nike (Brand)', 'brand');
+  const partner = await signInAs('Nike (Partner)', 'partner');
   const agent = await signInAs('BRAICE AI Agent', 'agent');
   log('auth', `creator  ${creator.email}`);
-  log('auth', `brand    ${brand.email}`);
+  log('auth', `partner  ${partner.email}`);
   log('auth', `agent    ${agent.email}`);
 
   // The creator links the configured signing key, because that key is the
@@ -270,7 +270,7 @@ async function main(): Promise<void> {
 
   // The AI agent links a throwaway wallet so the permission issued to it below has
   // an on-chain grantee pubkey. The grantee only has to be a pubkey the grant is
-  // addressed to; it never signs. The brand deliberately does not link one: its
+  // addressed to; it never signs. The partner deliberately does not link one: its
   // grant is authorised off-chain and never anchored, which is a supported path,
   // not a gap.
   const agentWallet = await linkWallet(agent.token);
@@ -329,7 +329,7 @@ async function main(): Promise<void> {
   // without this — and joining again is a duplicate the route answers with a
   // 409, which would abort the seed.
 
-  // The brand joins too, and it has to happen before step 6: asking for access
+  // The partner joins too, and it has to happen before step 6: asking for access
   // to a community's data is something its members do, and the check reads live
   // membership rather than the token. It also moves the community to
   // MEMBER_COUNT + 2 active members, which is what the threshold in step 7 is
@@ -338,9 +338,9 @@ async function main(): Promise<void> {
     'POST',
     `/communities/${communityId}/members`,
     undefined,
-    brand.token,
+    partner.token,
   );
-  log('members', 'brand joined');
+  log('members', 'partner joined');
 
   // --- 4. Activity -------------------------------------------------------
   console.log(`\n4. Ingesting ${ACTIVITY_COUNT} individual activity records`);
@@ -384,9 +384,9 @@ async function main(): Promise<void> {
   log('dataset', datasetId);
 
   // --- 6. Access request -------------------------------------------------
-  console.log('\n6. Brand requests access for campaign planning');
+  console.log('\n6. Partner requests access for campaign planning');
   // The requester is the authenticated caller and is no longer sent in the
-  // body, so the brand's own token is what files this.
+  // body, so the partner's own token is what files this.
   const request = await api<{ id: string }>(
     'POST',
     '/access-requests',
@@ -397,7 +397,7 @@ async function main(): Promise<void> {
       operation: 'ANALYZE',
       requestedDurationSeconds: 30 * 24 * 3600,
     },
-    brand.token,
+    partner.token,
   );
   const requestId = request.id;
   log('request', requestId);
@@ -408,7 +408,7 @@ async function main(): Promise<void> {
   // read from the community rather than computed from a constant. Arithmetic here
   // has now been wrong twice: MEMBER_COUNT alone ignored the creator (who is
   // enrolled as OPERATOR when the community is created), and MEMBER_COUNT + 1
-  // ignored the brand's join in step 3. Each produced a tally one or two votes
+  // ignored the partner's join in step 3. Each produced a tally one or two votes
   // short and a request that came back silently REJECTED — the failure looks
   // exactly like a governance bug, which is why the number is fetched instead.
   const enrolled = await api<number>(
@@ -419,9 +419,9 @@ async function main(): Promise<void> {
   );
 
   const thresholdVotes = Math.ceil((enrolled * 60) / 100);
-  // The creator plus enough members to clear it. The brand is in the
+  // The creator plus enough members to clear it. The partner is in the
   // denominator as an active member but does not vote on its own request: a
-  // brand asking for access does not get to approve it.
+  // partner asking for access does not get to approve it.
   const approvers = [creatorUser.id, ...memberIds.slice(0, thresholdVotes - 1)];
 
   const decision = await api<{ decision: string; approvalCount: number; threshold: number }>(
@@ -485,13 +485,13 @@ async function main(): Promise<void> {
   );
   log('authorize', `agent wrong purpose -> allowed=${wrongPurpose.allowed} (${wrongPurpose.reason})`);
 
-  const brandTry = await api<{ allowed: boolean; reason?: string }>(
+  const partnerTry = await api<{ allowed: boolean; reason?: string }>(
     'POST',
     '/authorize',
     { resourceId: datasetId, purpose: 'campaign_planning', operation: 'ANALYZE' },
-    brand.token,
+    partner.token,
   );
-  log('authorize', `brand (no permission) -> allowed=${brandTry.allowed} (${brandTry.reason})`);
+  log('authorize', `partner (no permission) -> allowed=${partnerTry.allowed} (${partnerTry.reason})`);
 
   // --- 10. The AI boundary ----------------------------------------------
   //
@@ -596,7 +596,7 @@ async function main(): Promise<void> {
 
   const seeded: Seeded = {
     creatorToken: creator.token,
-    brandToken: brand.token,
+    partnerToken: partner.token,
     agentToken: agent.token,
     communityId,
     datasetId,

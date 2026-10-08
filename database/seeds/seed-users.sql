@@ -16,7 +16,7 @@
 -- The digest is:
 --   scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ff...
 --
--- Roles: CREATOR / BRAND / APPLICATION are assigned by governance or an
+-- Roles: CREATOR / PARTNER / APPLICATION are assigned by governance or an
 -- operator tool, never by the person registering. POST /api/auth/register
 -- always creates a MEMBER.
 
@@ -24,9 +24,9 @@
 INSERT INTO users (id, email, password_hash, display_name, user_type, wallet_address) VALUES
 ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 'creator@demo.braice.local', 'scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ffa3bbb4361dba1a76c5d9c41f2dc034cee356ff6ef09f1c67717139847e32e1a12f41f62dbe84ca7d0b9d4a69ec31e5c6606174b057d1cff763991b81', 'DJ Afrobeat', 'CREATOR', 'CreatorWallet111111111111111111111111111111');
 
--- Brand (Nike)
+-- Partner (Nike)
 INSERT INTO users (id, email, password_hash, display_name, user_type, wallet_address) VALUES
-('b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'brand@demo.braice.local', 'scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ffa3bbb4361dba1a76c5d9c41f2dc034cee356ff6ef09f1c67717139847e32e1a12f41f62dbe84ca7d0b9d4a69ec31e5c6606174b057d1cff763991b81', 'Nike', 'BRAND', 'BrandWallet222222222222222222222222222222');
+('b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', 'partner@demo.braice.local', 'scrypt$32768$8$1$1a0088a05b0ceed067383b42a43da8de$13e3d2ffa3bbb4361dba1a76c5d9c41f2dc034cee356ff6ef09f1c67717139847e32e1a12f41f62dbe84ca7d0b9d4a69ec31e5c6606174b057d1cff763991b81', 'Nike', 'PARTNER', 'PartnerWallet222222222222222222222222222222');
 
 -- AI Agent
 INSERT INTO users (id, email, password_hash, display_name, user_type, wallet_address) VALUES
