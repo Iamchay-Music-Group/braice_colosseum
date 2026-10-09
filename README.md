@@ -6,7 +6,7 @@ BRAICE is a permission infrastructure that proves one thing:
 
 **Community governance decisions can control what AI and applications are technically allowed to do with community data.**
 
-This is not a community platform. This is not a traditional access control system. BRAICE is the layer that sits between data and applications, enforcing governance-derived authorization policies.
+This is not fully a community platform for now. This is not a traditional access control system. BRAICE is the layer that sits between data and applications, enforcing governance-derived authorization policies.
 
 ### The Problem
 
