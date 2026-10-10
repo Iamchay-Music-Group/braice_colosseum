@@ -278,6 +278,32 @@ describe('CommunitiesController (e2e)', () => {
           expect(res.body[0].memberships).toBeUndefined();
         });
     });
+
+    it('passes a name search through to the service', () => {
+      return request(app.getHttpServer())
+        .get('/api/communities?search=afro')
+        .expect(200)
+        .then(() => {
+          expect(communitiesService.findAll).toHaveBeenCalledWith('afro');
+        });
+    });
+
+    it('lists everything when no search is given', () => {
+      return request(app.getHttpServer())
+        .get('/api/communities')
+        .expect(200)
+        .then(() => {
+          expect(communitiesService.findAll).toHaveBeenCalledWith(undefined);
+        });
+    });
+
+    it('rejects an unexpected query parameter', () => {
+      // `forbidNonWhitelisted` is on globally, so any parameter outside the
+      // query DTO is a 400 rather than being silently ignored.
+      return request(app.getHttpServer())
+        .get('/api/communities?limit=5')
+        .expect(400);
+    });
   });
 
   describe('GET /api/communities/:id', () => {

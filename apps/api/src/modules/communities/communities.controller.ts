@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import {
 import { CommunitiesService } from './communities.service';
 import { MembershipsService } from '../memberships/memberships.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
+import { ListCommunitiesQueryDto } from './dto/list-communities-query.dto';
 import {
   CurrentPrincipal,
   JwtAuthGuard,
@@ -79,12 +81,13 @@ export class CommunitiesController {
     summary: 'List all communities',
     description:
       'Public directory: name, description and governance configuration ' +
-      'only. Memberships and operator identity are not included.',
+      'only. Memberships and operator identity are not included. An optional ' +
+      '`search` query narrows the list to names containing the term.',
   })
   @ApiOkResponse({ description: 'List of communities' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
-  async findAll() {
-    const communities = await this.communitiesService.findAll();
+  async findAll(@Query() query: ListCommunitiesQueryDto) {
+    const communities = await this.communitiesService.findAll(query.search);
 
     // findAll loads the `operator` relation. The operator's email is not part
     // of the community's public identity, so the listing is projected down

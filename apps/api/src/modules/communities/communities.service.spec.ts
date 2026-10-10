@@ -245,6 +245,29 @@ describe('CommunitiesService', () => {
         order: { createdAt: 'DESC' },
       });
     });
+
+    it('filters by name when a search term is given', async () => {
+      repo.find!.mockResolvedValue([]);
+
+      await service.findAll('afro');
+
+      expect(repo.find).toHaveBeenCalledWith({
+        where: { name: expect.anything() },
+        relations: ['operator'],
+        order: { createdAt: 'DESC' },
+      });
+    });
+
+    it('treats a blank search term as no search', async () => {
+      repo.find!.mockResolvedValue([]);
+
+      await service.findAll('   ');
+
+      expect(repo.find).toHaveBeenCalledWith({
+        relations: ['operator'],
+        order: { createdAt: 'DESC' },
+      });
+    });
   });
 
   describe('findByOperator', () => {

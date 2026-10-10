@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, ILike, Repository } from 'typeorm';
 import { Community } from './entities/community.entity';
 import { CreateCommunityDto } from './dto/create-community.dto';
 import { Membership } from '../memberships/entities/membership.entity';
@@ -126,10 +126,33 @@ export class CommunitiesService {
     return this.communityRepo.findOne({ where: { id } });
   }
 
-  async findAll(): Promise<Community[]> {
+  /**
+   * The directory, newest first, optionally narrowed by name.
+   *
+   * When `search` is given the match is a case-insensitive substring on the
+   * name. `where` is only attached when there is a term, so the unfiltered
+   * listing stays exactly the query it was and does not acquire a redundant
+   * `WHERE` clause.
+   */
+  async findAll(search?: string): Promise<Community[]> {
+    const term = search?.trim();
+
     return this.communityRepo.find({
+      ...(term ? { where: { name: ILike(`%${escapeLike(term)}%`) } } : {}),
       relations: ['operator'],
       order: { createdAt: 'DESC' },
     });
   }
+}
+
+/**
+ * Neutralise LIKE wildcards in a user-supplied term.
+ *
+ * Without this a search for `%` would match every community and a term
+ * containing `_` would match any single character — the caller would be
+ * editing the query rather than searching it. Postgres uses `\` as the default
+ * LIKE escape character, so each of `\`, `%` and `_` is escaped with it.
+ */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
